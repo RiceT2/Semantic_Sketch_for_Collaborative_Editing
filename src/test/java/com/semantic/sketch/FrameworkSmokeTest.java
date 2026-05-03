@@ -1,6 +1,7 @@
 package com.semantic.sketch;
 
 import com.semantic.sketch.ablation.AutoAblationEngine;
+import com.semantic.sketch.ablation.HumanArbiter;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -75,5 +76,27 @@ class FrameworkSmokeTest {
 
         MergeDecision rollback = engine.rollback("master");
         assertEquals(decision.score(), rollback.score());
+    }
+
+    @Test
+    void editingOrchestrator_routesThroughHumanAndRollback() {
+        var orchestrator = new EditingOrchestrator(
+                new LightweightSemanticFingerprintService(),
+                new ConflictManager(),
+                new FactorGraphBuilder(),
+                new GreedyInferenceEngine(),
+                new IntentResidueCalculator(),
+                (branchId, candidate) -> false,
+                new ShadowStoreHistoryRecoveryService(new InMemoryShadowStore() {{
+                    save("master", new MergeDecision(List.of(), List.of(), -1.0));
+                }}),
+                0.95
+        );
+
+        Message incoming = new Message("3", "c", "replace sky blue", Map.of("c", 2L), 0L);
+        Message pending = new Message("4", "d", "replace sky red", Map.of("d", 2L), 0L);
+
+        MergeDecision result = orchestrator.orchestrate("master", incoming, List.of(pending));
+        assertEquals(-1.0, result.score());
     }
 }
