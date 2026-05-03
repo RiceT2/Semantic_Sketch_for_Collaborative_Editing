@@ -2,8 +2,11 @@ package com.semantic.sketch.ablation;
 
 import com.semantic.sketch.crdt.Message;
 import com.semantic.sketch.model.FactorGraph;
+import com.semantic.sketch.model.ShadowMetadata;
+import com.semantic.sketch.model.SemanticTriple;
 import com.semantic.sketch.storage.ShadowStore;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -36,7 +39,13 @@ public class AutoAblationEngine {
 
         FactorGraph graph = graphBuilder.build(conflictSet.isEmpty() ? candidates : conflictSet);
         MergeDecision decision = inferenceEngine.infer(graph);
-        shadowStore.save(branchId, decision);
+        Message seed = candidates.isEmpty() ? null : candidates.get(0);
+        ShadowMetadata metadata = new ShadowMetadata(
+                seed == null ? 0L : seed.getSemanticFingerprint(),
+                List.of(new SemanticTriple("merge", "vector-clock-concurrent", "branch:" + branchId)),
+                Instant.now(),
+                seed == null ? "system" : seed.getActorId());
+        shadowStore.save(branchId, decision, metadata);
 
         if (humanArbiter.accept(branchId, decision)) {
             shadowStore.clear(branchId);

@@ -1,5 +1,8 @@
 package com.semantic.sketch.semantic;
 
+import com.semantic.sketch.model.SemanticHashResult;
+import com.semantic.sketch.model.SemanticVector;
+
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -32,6 +35,11 @@ public final class SimHash64 {
             }
         }
         return fingerprint;
+    }
+
+    public static SemanticHashResult fromVector(SemanticVector vector) {
+        long hash = fromWeightedKeywords(vector.features());
+        return new SemanticHashResult(hash, vector.features().size());
     }
 
     public static int hammingDistance(long a, long b) {
