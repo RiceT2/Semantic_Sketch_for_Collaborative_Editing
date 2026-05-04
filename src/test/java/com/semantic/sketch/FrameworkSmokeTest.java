@@ -88,7 +88,7 @@ class FrameworkSmokeTest {
                 new IntentResidueCalculator(),
                 (branchId, candidate) -> false,
                 new ShadowStoreHistoryRecoveryService(new InMemoryShadowStore() {{
-                    save("master", new MergeDecision(List.of(), List.of(), -1.0));
+                    save("master", new MergeDecision(List.of(), List.of(), -1.0, List.of()));
                 }}),
                 0.95
         );

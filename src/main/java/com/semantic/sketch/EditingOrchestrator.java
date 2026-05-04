@@ -50,7 +50,7 @@ public class EditingOrchestrator {
 
         List<Message> conflictSet = collectConcurrent(enrichedIncoming, enrichedPending);
         if (conflictSet.isEmpty()) {
-            return new MergeDecision(List.of(enrichedIncoming), List.of(), 1.0d);
+            return new MergeDecision(List.of(enrichedIncoming), List.of(), 1.0d, List.of());
         }
 
         List<Message> candidates = new ArrayList<>(conflictSet);
