@@ -25,6 +25,12 @@
    - 影子存储：`ShadowStore`（当前是 `InMemoryShadowStore`，可替换为 Redis MVCC）。
    - 提交/回溯：`AutoAblationEngine` + `HumanArbiter`。
 
+5. **后台图维护**
+   - `GraphMaintenanceService`：可通过 `startPeriodic` 周期扫描 `ShadowStore` 中的影子图快照，先检查因果稳定性；不稳定分支会在报告中记录跳过原因。
+   - 对无主干前置依赖且未被接受节点引用的孤立拒绝操作进行归档后物理删除，保留 `OperationArchive` 便于审计追溯。
+   - 对语义漂移量小于阈值 ε 的连续同作者接受节点进行压缩合并，并在清理前后写入维护元数据保证读取一致性。
+   - `MaintenanceReport` 输出删除数、压缩数和跳过原因，当前基于 `InMemoryShadowStore`，后续可切换到 Redis/MVCC 等持久化存储。
+
 ## 后续建议
 
 - 接入 DJL/ONNX：将 `extractWeightedKeywords` 替换为 embedding + 稀疏投影。
