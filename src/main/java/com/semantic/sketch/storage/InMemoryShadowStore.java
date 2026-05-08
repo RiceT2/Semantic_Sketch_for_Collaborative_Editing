@@ -1,10 +1,16 @@
 package com.semantic.sketch.storage;
 
 import com.semantic.sketch.ablation.MergeDecision;
+import com.semantic.sketch.crdt.Message;
+import com.semantic.sketch.maintenance.OperationArchive;
 import com.semantic.sketch.model.ShadowMetadata;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -13,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryShadowStore implements ShadowStore {
     private final Map<String, MergeDecision> data = new ConcurrentHashMap<>();
     private final Map<String, ShadowMetadata> metadata = new ConcurrentHashMap<>();
+    private final Map<String, List<OperationArchive>> archives = new ConcurrentHashMap<>();
 
     @Override
     public void save(String branchId, MergeDecision decision) {
@@ -36,8 +43,25 @@ public class InMemoryShadowStore implements ShadowStore {
     }
 
     @Override
+    public Set<String> branchIds() {
+        return Set.copyOf(data.keySet());
+    }
+
+    @Override
+    public void archive(String branchId, Message operation, String reason) {
+        archives.computeIfAbsent(branchId, ignored -> new ArrayList<>())
+                .add(new OperationArchive(branchId, operation, reason, Instant.now()));
+    }
+
+    @Override
+    public List<OperationArchive> archives(String branchId) {
+        return List.copyOf(archives.getOrDefault(branchId, List.of()));
+    }
+
+    @Override
     public void clear(String branchId) {
         data.remove(branchId);
         metadata.remove(branchId);
+        archives.remove(branchId);
     }
 }
