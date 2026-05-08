@@ -31,6 +31,12 @@
    - 对语义漂移量小于阈值 ε 的连续同作者接受节点进行压缩合并，并在清理前后写入维护元数据保证读取一致性。
    - `MaintenanceReport` 输出删除数、压缩数和跳过原因，当前基于 `InMemoryShadowStore`，后续可切换到 Redis/MVCC 等持久化存储。
 
+
+6. **浏览器验证台与多用户转发**
+   - `CollaborativeEditingWebServer`：基于 JDK `HttpServer` 提供静态页面、REST API 与 Server-Sent Events 实时事件通道。
+   - `CollaborationSessionHub`：在内存中模拟多用户向量时钟、语义指纹生成、并发冲突检测、最优方案计算和人工介入请求。
+   - 前端页面 `src/main/resources/static/index.html`：支持提交编辑、查看冲突提示、处理人工介入请求，并可在多个浏览器窗口间观察实时转发。
+
 ## 后续建议
 
 - 接入 DJL/ONNX：将 `extractWeightedKeywords` 替换为 embedding + 稀疏投影。
@@ -43,3 +49,12 @@
 ```bash
 mvn test
 ```
+
+启动浏览器验证台：
+
+```bash
+mvn -DskipTests compile
+java -cp target/classes com.semantic.sketch.web.CollaborativeEditingWebServer 8080
+```
+
+如果没有配置 Maven Exec 插件，也可以在 IDE 中直接运行 `com.semantic.sketch.web.CollaborativeEditingWebServer`，然后访问 `http://localhost:8080`。

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Semantic Sketch 协同编辑验证台</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: #f4f7fb; color: #172033; }
+    header { padding: 24px 32px; background: linear-gradient(135deg, #243b8f, #4b79f6); color: white; }
+    header h1 { margin: 0 0 8px; font-size: 26px; }
+    header p { margin: 0; opacity: .9; }
+    main { display: grid; grid-template-columns: 360px 1fr; gap: 18px; padding: 18px; }
+    section { background: white; border: 1px solid #dbe3f0; border-radius: 16px; box-shadow: 0 8px 24px rgba(33, 53, 94, .08); }
+    .panel { padding: 18px; }
+    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 700; color: #41506b; }
+    input, textarea, select { width: 100%; box-sizing: border-box; margin-top: 6px; border: 1px solid #c9d4e5; border-radius: 10px; padding: 10px 12px; font: inherit; }
+    textarea { min-height: 110px; resize: vertical; }
+    button { border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; background: #315efb; color: white; }
+    button.secondary { background: #eef3ff; color: #315efb; }
+    button.danger { background: #f05252; }
+    button + button { margin-left: 8px; }
+    .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .timeline { padding: 18px; max-height: 720px; overflow: auto; }
+    .event { border-left: 4px solid #9fb5e8; margin-bottom: 12px; padding: 10px 12px; background: #f9fbff; border-radius: 10px; }
+    .event.conflict, .event.human_intervention_required { border-left-color: #f59e0b; background: #fff8ed; }
+    .event.human_decision { border-left-color: #10b981; background: #eefdf7; }
+    .event.applied { border-left-color: #315efb; }
+    .event h3 { margin: 0 0 6px; font-size: 15px; }
+    .event p { margin: 4px 0; font-size: 13px; color: #44536d; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; }
+    .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 12px; background: #fbfdff; min-height: 92px; }
+    .card h2 { margin: 0 0 8px; font-size: 15px; color: #243b8f; }
+    code { background: #edf2ff; padding: 2px 5px; border-radius: 5px; }
+    .op { padding: 8px; border-radius: 8px; background: #eef3ff; margin-top: 8px; font-size: 13px; }
+    .request { border: 1px dashed #f59e0b; background: #fff8ed; border-radius: 12px; padding: 12px; margin-top: 10px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Semantic Sketch 协同编辑验证台</h1>
+  <p>通过 HTTP + Server-Sent Events 模拟多用户编辑转发、语义冲突提示、最优方案计算与人工介入。</p>
+</header>
+<main>
+  <section class="panel">
+    <h2>发送编辑操作</h2>
+    <label>分支 ID</label>
+    <input id="branchId" value="master">
+    <label>用户</label>
+    <select id="actorId">
+      <option value="alice">alice</option>
+      <option value="bob">bob</option>
+      <option value="owner">owner（高权重）</option>
+      <option value="reviewer">reviewer</option>
+    </select>
+    <label>编辑内容 / 意图</label>
+    <textarea id="payload">replace sky with blue gradient</textarea>
+    <p style="font-size:13px;color:#5c6b85">提示：分别用 alice 和 bob 快速提交相似编辑，可触发并发冲突与人工介入请求。</p>
+    <button onclick="submitEdit()">提交编辑</button>
+    <button class="secondary" onclick="loadSnapshot()">刷新快照</button>
+    <div class="quick">
+      <button class="secondary" onclick="demo('alice','replace title with semantic sketch')">Alice 标题</button>
+      <button class="secondary" onclick="demo('bob','replace title with collaborative sketch')">Bob 标题</button>
+      <button class="secondary" onclick="demo('owner','delete global section if stale')">Owner 删除</button>
+      <button class="secondary" onclick="demo('reviewer','insert local comment about conflict')">Reviewer 评论</button>
+    </div>
+    <div id="humanRequests"></div>
+  </section>
+  <section>
+    <div class="grid">
+      <div class="card"><h2>当前主文档操作</h2><div id="ops"></div></div>
+      <div class="card"><h2>待人工介入</h2><div id="pending"></div></div>
+      <div class="card"><h2>连接状态</h2><p id="status">连接中...</p><p>打开多个浏览器窗口可观察跨用户实时转发。</p></div>
+    </div>
+    <div class="timeline" id="timeline"></div>
+  </section>
+</main>
+<script>
+const timeline = document.getElementById('timeline');
+const source = new EventSource('/events');
+['connected','applied','human_intervention_required','conflict_detected','human_decision','system'].forEach(name => {
+  source.addEventListener(name, event => renderEvent(name, JSON.parse(event.data)));
+});
+source.onopen = () => document.getElementById('status').textContent = 'SSE 已连接';
+source.onerror = () => document.getElementById('status').textContent = 'SSE 连接重试中';
+
+async function submitEdit() {
+  const body = {
+    branchId: branchId.value,
+    actorId: actorId.value,
+    payload: payload.value
+  };
+  const res = await fetch('/api/operations', { method: 'POST', body: JSON.stringify(body) });
+  renderEvent('api_response', await res.json());
+}
+function demo(actor, text) {
+  actorId.value = actor;
+  payload.value = text;
+  submitEdit();
+}
+async function humanDecision(requestId, decision) {
+  const res = await fetch('/api/human-decision', { method: 'POST', body: JSON.stringify({ branchId: branchId.value, requestId, decision }) });
+  renderEvent('api_response', await res.json());
+}
+async function loadSnapshot() {
+  const res = await fetch('/api/snapshot?branchId=' + encodeURIComponent(branchId.value));
+  updateSnapshot(await res.json());
+}
+function renderEvent(type, data) {
+  const div = document.createElement('div');
+  div.className = 'event ' + type;
+  div.innerHTML = `<h3>${label(type)}</h3><p>${data.message || ''}</p>${metrics(data)}${opsLine(data)}`;
+  timeline.prepend(div);
+  if (data.snapshot) updateSnapshot(data.snapshot);
+}
+function metrics(data) {
+  if (data.residue === undefined) return '';
+  return `<p>score=<code>${Number(data.score).toFixed(3)}</code>，R=<code>${Number(data.residue).toFixed(3)}</code>，request=<code>${data.requestId || '-'}</code></p>`;
+}
+function opsLine(data) {
+  const accepted = (data.acceptedOps || []).map(op => op.actorId + ':' + op.payload).join(' | ') || '-';
+  const rejected = (data.rejectedOps || []).map(op => op.actorId + ':' + op.payload).join(' | ') || '-';
+  return `<p>接受：${accepted}</p><p>拒绝：${rejected}</p>`;
+}
+function updateSnapshot(snapshot) {
+  document.getElementById('ops').innerHTML = (snapshot.operations || []).map(op => `<div class="op"><b>${op.actorId}</b> ${op.payload}<br><code>${op.opId}</code></div>`).join('') || '<p>暂无操作</p>';
+  const requests = snapshot.pendingRequests || [];
+  document.getElementById('pending').innerHTML = requests.map(req => `<div class="request"><b>${req.requestId}</b><p>R=${Number(req.residue).toFixed(3)}</p><button onclick="humanDecision('${req.requestId}','accept')">接受最优方案</button><button class="danger" onclick="humanDecision('${req.requestId}','rollback')">回溯</button></div>`).join('') || '<p>暂无请求</p>';
+  document.getElementById('humanRequests').innerHTML = document.getElementById('pending').innerHTML;
+}
+function label(type) {
+  return ({connected:'实时通道已连接', applied:'操作已应用', human_intervention_required:'人工介入请求', conflict_detected:'冲突提示', human_decision:'人工决策完成', api_response:'接口响应', system:'系统消息'})[type] || type;
+}
+loadSnapshot();
+</script>
+</body>
+</html>

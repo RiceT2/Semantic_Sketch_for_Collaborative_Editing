@@ -14,6 +14,7 @@ import com.semantic.sketch.semantic.LightweightSemanticFingerprintService;
 import com.semantic.sketch.semantic.SimHash64;
 import com.semantic.sketch.semantic.SlidingWindowSemanticValidator;
 import com.semantic.sketch.storage.InMemoryShadowStore;
+import com.semantic.sketch.web.CollaborationSessionHub;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,27 @@ class FrameworkSmokeTest {
 
         MergeDecision result = orchestrator.orchestrate("master", incoming, List.of(pending));
         assertEquals(-1.0, result.score());
+    }
+
+    @Test
+    void collaborationHub_promptsHumanInterventionForConcurrentEdits() {
+        CollaborationSessionHub hub = new CollaborationSessionHub(
+                new LightweightSemanticFingerprintService(),
+                new ConflictManager(),
+                new FactorGraphBuilder(),
+                new GreedyInferenceEngine(),
+                new IntentResidueCalculator(),
+                0.80d
+        );
+
+        CollaborationSessionHub.HubResult first = hub.submit("master", "alice", "replace title with semantic sketch");
+        CollaborationSessionHub.HubResult second = hub.submit("master", "bob", "replace title with collaborative sketch");
+
+        assertEquals("applied", first.type());
+        assertEquals("human_intervention_required", second.type());
+        assertFalse(second.requestId().isBlank());
+        assertEquals(1, second.acceptedOps().size());
+        assertEquals(1, second.rejectedOps().size());
     }
 
     @Test
