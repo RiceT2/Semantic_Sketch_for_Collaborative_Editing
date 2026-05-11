@@ -27,6 +27,24 @@ public final class Message {
         this.semanticFingerprint = semanticFingerprint;
     }
 
+    public Message(CrdtOperationEnvelope envelope) {
+        this(
+                Objects.requireNonNull(envelope, "envelope").getOpId(),
+                envelope.getActorId(),
+                envelope.toLegacyPayload(),
+                envelope.getVectorClock(),
+                envelope.getSemanticFingerprint()
+        );
+    }
+
+    public static Message fromEnvelope(CrdtOperationEnvelope envelope) {
+        return new Message(envelope);
+    }
+
+    public CrdtOperationEnvelope toEnvelope(String branchId, CrdtOperationType operationType) {
+        return CrdtOperationEnvelope.fromMessage(this, branchId, operationType);
+    }
+
     public String getOpId() {
         return opId;
     }
