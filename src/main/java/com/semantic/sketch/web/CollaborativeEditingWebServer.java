@@ -1,6 +1,6 @@
 package com.semantic.sketch.web;
 
-import com.semantic.sketch.IntentResidueCalculator;
+import com.semantic.sketch.semantic.IntentResidualCalculator;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -31,7 +31,7 @@ public class CollaborativeEditingWebServer {
                 new ConflictManager(),
                 new FactorGraphBuilder(Map.of("owner", 1.5d, "reviewer", 1.2d)),
                 new GreedyInferenceEngine(),
-                new IntentResidueCalculator(),
+                new IntentResidualCalculator(),
                 0.80d
         );
         this.broadcaster = new SseBroadcaster();

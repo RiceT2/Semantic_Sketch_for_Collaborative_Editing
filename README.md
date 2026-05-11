@@ -22,8 +22,9 @@
    - 冲突收集：`ConflictManager`（基于向量时钟并发判断）。
    - 建模：`FactorGraphBuilder`（以 SimHash 汉明距离生成边权 ψ）。
    - 推理：`GreedyInferenceEngine`（轻量贪心近似）。
+   - 意图残差评分：`IntentResidualCalculator` 按操作执行状态、语义权重、信息熵权重、角色权重计算统一量纲的 R。
    - 影子存储：`ShadowStore`（当前是 `InMemoryShadowStore`，可替换为 Redis MVCC）。
-   - 提交/回溯：`AutoAblationEngine` + `HumanArbiter`。
+   - 提交/回溯：`AutoAblationEngine` + `HumanArbiter`，人工结果支持接受系统方案或回溯重做。
 
 5. **后台图维护**
    - `GraphMaintenanceService`：可通过 `startPeriodic` 周期扫描 `ShadowStore` 中的影子图快照，先检查因果稳定性；不稳定分支会在报告中记录跳过原因。
@@ -36,6 +37,22 @@
    - `CollaborativeEditingWebServer`：基于 JDK `HttpServer` 提供静态页面、REST API 与 Server-Sent Events 实时事件通道。
    - `CollaborationSessionHub`：在内存中模拟多用户向量时钟、语义指纹生成、并发冲突检测、最优方案计算和人工介入请求。
    - 前端页面 `src/main/resources/static/index.html`：支持提交编辑、查看冲突提示、处理人工介入请求，并可在多个浏览器窗口间观察实时转发。
+
+## 意图残差 R 与阈值
+
+`IntentResidualCalculator` 输出的 R 是一个无量纲归一化分数，范围固定为 `[0, 1]`：
+
+```text
+R = Σ(completion(op) × weight(op)) / Σ(weight(op))
+weight(op) = mean(semanticWeight(op), entropyWeight(op), roleWeight(op))
+```
+
+- `completion(op)` 来自最优方案下的操作执行状态：`EXECUTED=1.0`、`PARTIAL=0.5`、`SKIPPED=0.0`。
+- `semanticWeight`、`entropyWeight`、`roleWeight` 都会被裁剪到 `[0, 1]` 后再求平均，确保不同来源权重处于统一量纲。
+- R 越高表示系统方案保留的加权意图越完整；R 越低表示关键意图被跳过或只部分执行的风险越高。
+- 主编排入口使用阈值 `τ` 判断：当 `R < τ` 时触发 `HumanArbiter`；当 `R >= τ` 时自动接受最优方案。浏览器验证台默认示例阈值为 `τ=0.80`。
+- `HumanArbiter` 的结果只有两类：`ACCEPT_SYSTEM_PLAN` 表示接受系统最优方案；`ROLLBACK_REDO` 表示回溯重做，并会把触发原因、决策人、回溯范围写入 `RecoveryAudit` 传给日志恢复流程。
+
 
 ## 后续建议
 

@@ -2,6 +2,7 @@ package com.semantic.sketch;
 
 import com.semantic.sketch.ablation.AutoAblationEngine;
 import com.semantic.sketch.ablation.HumanArbiter;
+import com.semantic.sketch.ablation.HumanArbiterDecision;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -10,6 +11,7 @@ import com.semantic.sketch.crdt.Message;
 import com.semantic.sketch.maintenance.GraphMaintenanceService;
 import com.semantic.sketch.maintenance.MaintenanceReport;
 import com.semantic.sketch.protocol.SemanticProtocolCodec;
+import com.semantic.sketch.semantic.IntentResidualCalculator;
 import com.semantic.sketch.semantic.LightweightSemanticFingerprintService;
 import com.semantic.sketch.semantic.SimHash64;
 import com.semantic.sketch.semantic.SlidingWindowSemanticValidator;
@@ -69,7 +71,7 @@ class FrameworkSmokeTest {
                 new FactorGraphBuilder(),
                 new GreedyInferenceEngine(),
                 new InMemoryShadowStore(),
-                (branchId, candidate) -> false
+                (branchId, candidate, residualScore) -> HumanArbiterDecision.rollbackRedo("test rollback", "test", "branch:" + branchId)
         );
 
         Message m1 = new Message("1", "a", "insert hello", Map.of("a", 2L), 11L);
@@ -84,16 +86,17 @@ class FrameworkSmokeTest {
 
     @Test
     void editingOrchestrator_routesThroughHumanAndRollback() {
+        ShadowStoreHistoryRecoveryService recoveryService = new ShadowStoreHistoryRecoveryService(new InMemoryShadowStore() {{
+            save("master", new MergeDecision(List.of(), List.of(), -1.0, List.of()));
+        }});
         var orchestrator = new EditingOrchestrator(
                 new LightweightSemanticFingerprintService(),
                 new ConflictManager(),
                 new FactorGraphBuilder(),
                 new GreedyInferenceEngine(),
-                new IntentResidueCalculator(),
-                (branchId, candidate) -> false,
-                new ShadowStoreHistoryRecoveryService(new InMemoryShadowStore() {{
-                    save("master", new MergeDecision(List.of(), List.of(), -1.0, List.of()));
-                }}),
+                new IntentResidualCalculator(),
+                (branchId, candidate, residualScore) -> HumanArbiterDecision.rollbackRedo("test rollback", "test", "branch:" + branchId),
+                recoveryService,
                 0.95
         );
 
@@ -102,6 +105,27 @@ class FrameworkSmokeTest {
 
         MergeDecision result = orchestrator.orchestrate("master", incoming, List.of(pending));
         assertEquals(-1.0, result.score());
+        assertEquals("test rollback", recoveryService.lastRecoveryAudit().orElseThrow().triggerReason());
+        assertEquals("test", recoveryService.lastRecoveryAudit().orElseThrow().decidedBy());
+        assertEquals("branch:master", recoveryService.lastRecoveryAudit().orElseThrow().rollbackScope());
+    }
+
+
+    @Test
+    void intentResidualCalculator_weightsExecutionStatesOnZeroOneScale() {
+        IntentResidualCalculator calculator = new IntentResidualCalculator();
+        double residual = calculator.calculate(new IntentResidualCalculator.ResidualInput(
+                Map.of(
+                        "critical", IntentResidualCalculator.ExecutionState.SKIPPED,
+                        "minor", IntentResidualCalculator.ExecutionState.EXECUTED
+                ),
+                Map.of("critical", 1.0d, "minor", 0.2d),
+                Map.of("critical", 1.0d, "minor", 0.2d),
+                Map.of("critical", 1.0d, "minor", 0.2d)
+        ));
+
+        assertTrue(residual > 0.0d);
+        assertTrue(residual < 0.5d);
     }
 
     @Test
@@ -111,7 +135,7 @@ class FrameworkSmokeTest {
                 new ConflictManager(),
                 new FactorGraphBuilder(),
                 new GreedyInferenceEngine(),
-                new IntentResidueCalculator(),
+                new IntentResidualCalculator(),
                 0.80d
         );
 

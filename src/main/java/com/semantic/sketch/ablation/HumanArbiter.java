@@ -1,5 +1,5 @@
 package com.semantic.sketch.ablation;
 
 public interface HumanArbiter {
-    boolean accept(String branchId, MergeDecision candidate);
+    HumanArbiterDecision arbitrate(String branchId, MergeDecision candidate, double residualScore);
 }

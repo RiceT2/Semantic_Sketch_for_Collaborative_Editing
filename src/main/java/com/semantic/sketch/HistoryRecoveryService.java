@@ -9,4 +9,8 @@ import java.util.Optional;
  */
 public interface HistoryRecoveryService {
     Optional<MergeDecision> recover(String branchId);
+
+    default Optional<MergeDecision> recover(String branchId, RecoveryAudit audit) {
+        return recover(branchId);
+    }
 }

@@ -4,8 +4,10 @@ import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
 import com.semantic.sketch.ablation.HumanArbiter;
+import com.semantic.sketch.ablation.HumanArbiterDecision;
 import com.semantic.sketch.ablation.MergeDecision;
 import com.semantic.sketch.crdt.Message;
+import com.semantic.sketch.semantic.IntentResidualCalculator;
 import com.semantic.sketch.semantic.SemanticFingerprintService;
 
 import java.util.ArrayList;
@@ -21,7 +23,7 @@ public class EditingOrchestrator {
     private final ConflictManager conflictManager;
     private final FactorGraphBuilder factorGraphBuilder;
     private final GreedyInferenceEngine greedyInferenceEngine;
-    private final IntentResidueCalculator intentResidueCalculator;
+    private final IntentResidualCalculator intentResidualCalculator;
     private final HumanArbiter humanArbiter;
     private final HistoryRecoveryService historyRecoveryService;
     private final double residueThreshold;
@@ -30,7 +32,7 @@ public class EditingOrchestrator {
                                ConflictManager conflictManager,
                                FactorGraphBuilder factorGraphBuilder,
                                GreedyInferenceEngine greedyInferenceEngine,
-                               IntentResidueCalculator intentResidueCalculator,
+                               IntentResidualCalculator intentResidualCalculator,
                                HumanArbiter humanArbiter,
                                HistoryRecoveryService historyRecoveryService,
                                double residueThreshold) {
@@ -38,7 +40,7 @@ public class EditingOrchestrator {
         this.conflictManager = Objects.requireNonNull(conflictManager, "conflictManager");
         this.factorGraphBuilder = Objects.requireNonNull(factorGraphBuilder, "factorGraphBuilder");
         this.greedyInferenceEngine = Objects.requireNonNull(greedyInferenceEngine, "greedyInferenceEngine");
-        this.intentResidueCalculator = Objects.requireNonNull(intentResidueCalculator, "intentResidueCalculator");
+        this.intentResidualCalculator = Objects.requireNonNull(intentResidualCalculator, "intentResidualCalculator");
         this.humanArbiter = Objects.requireNonNull(humanArbiter, "humanArbiter");
         this.historyRecoveryService = Objects.requireNonNull(historyRecoveryService, "historyRecoveryService");
         this.residueThreshold = residueThreshold;
@@ -57,17 +59,22 @@ public class EditingOrchestrator {
         candidates.add(enrichedIncoming);
         MergeDecision optimal = greedyInferenceEngine.infer(factorGraphBuilder.build(candidates));
 
-        double residue = intentResidueCalculator.calculate(optimal);
-        if (residue >= residueThreshold) {
+        double residualScore = intentResidualCalculator.calculate(optimal);
+        if (residualScore >= residueThreshold) {
             return optimal;
         }
 
-        boolean acceptedByHuman = humanArbiter.accept(branchId, optimal);
-        if (acceptedByHuman) {
+        HumanArbiterDecision humanDecision = humanArbiter.arbitrate(branchId, optimal, residualScore);
+        if (humanDecision.decisionType() == HumanArbiterDecision.DecisionType.ACCEPT_SYSTEM_PLAN) {
             return optimal;
         }
 
-        return historyRecoveryService.recover(branchId).orElse(optimal);
+        RecoveryAudit audit = RecoveryAudit.of(
+                humanDecision.triggerReason(),
+                humanDecision.decidedBy(),
+                humanDecision.rollbackScope()
+        );
+        return historyRecoveryService.recover(branchId, audit).orElse(optimal);
     }
 
     private Message enrichFingerprint(Message message) {
