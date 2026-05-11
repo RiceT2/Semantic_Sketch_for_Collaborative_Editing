@@ -38,6 +38,88 @@
    - `CollaborationSessionHub`：在内存中模拟多用户向量时钟、语义指纹生成、并发冲突检测、最优方案计算和人工介入请求。
    - 前端页面 `src/main/resources/static/index.html`：支持提交编辑、查看冲突提示、处理人工介入请求，并可在多个浏览器窗口间观察实时转发。
 
+
+## API 兼容策略
+
+浏览器验证台当前保留 `/api/operations` 的轻量请求格式，以便 demo 和已有脚本继续运行；该格式只把用户编辑意图放在 `payload` 字符串中。后续真实协同协议应逐步迁移到 `CrdtOperationEnvelope`，由 envelope 明确描述操作类型、目标路径、编辑范围、用户意图、Yjs update 二进制内容以及语义元数据。
+
+### 兼容原则
+
+1. **旧 `payload` 仍可用作 demo 兼容层**：`POST /api/operations` 继续接受 `branchId`、`actorId`、`payload` 三个字段；服务端把 `payload` 视为用户自然语言编辑说明，而不是完整 CRDT 操作。
+2. **新协议使用 `CrdtOperationEnvelope`**：新客户端应发送结构化 envelope，至少包含 `operationType`、`targetPath`、`range`、`intent`、`yjsUpdate` 和 `semanticMetadata`。其中 `yjsUpdate` 建议使用 Base64 编码承载 Yjs update 字节，便于在 JSON API 中传输。
+3. **旧请求默认转换规则**：
+   - 当旧请求的 `payload` 看起来是内容插入或替换类编辑（例如包含 `insert`、`add`、`replace`、`write`、`append`，或没有明确注释语义）时，兼容层默认转换为 `operationType=INSERT`。
+   - 当 `payload` 明确表现为批注、评论、标记、解释等语义（例如包含 `annotate`、`comment`、`note`、`tag`、`explain`）时，兼容层默认转换为 `operationType=ANNOTATE`。
+   - 旧请求没有结构化路径和范围时，默认 `targetPath="/document"`，`range` 使用当前光标或服务端可推断的最小范围；无法推断时使用空范围 `{ "start": 0, "end": 0 }`。
+   - 旧请求的 `intent.summary` 直接来自 `payload`，`intent.source="legacy-payload"`；`semanticMetadata.compatibilityMode=true`，并记录 `semanticMetadata.defaultRule` 说明命中的默认转换规则。
+4. **迁移建议**：服务端可在一段时间内同时接受旧请求和 envelope；新功能（精确路径、多范围、Yjs 增量同步、可解释语义标签）只保证在 `CrdtOperationEnvelope` 上完整表达。
+
+### 旧请求示例
+
+```http
+POST /api/operations
+Content-Type: application/json
+
+{
+  "branchId": "main",
+  "actorId": "alice",
+  "payload": "replace sky with blue gradient"
+}
+```
+
+兼容层可将上面的旧请求解释为：
+
+```json
+{
+  "operationType": "INSERT",
+  "targetPath": "/document",
+  "range": { "start": 0, "end": 0 },
+  "intent": {
+    "summary": "replace sky with blue gradient",
+    "source": "legacy-payload"
+  },
+  "yjsUpdate": null,
+  "semanticMetadata": {
+    "compatibilityMode": true,
+    "defaultRule": "legacy payload without explicit annotation keywords defaults to INSERT"
+  }
+}
+```
+
+### 新 `CrdtOperationEnvelope` 请求示例
+
+```http
+POST /api/operations
+Content-Type: application/json
+
+{
+  "branchId": "main",
+  "actorId": "alice",
+  "envelope": {
+    "operationId": "op-20260511-0001",
+    "operationType": "ANNOTATE",
+    "targetPath": "/canvas/layers/sky",
+    "range": {
+      "start": 120,
+      "end": 184,
+      "unit": "utf16-code-unit"
+    },
+    "intent": {
+      "summary": "Mark the sky layer as needing a softer blue gradient.",
+      "confidence": 0.92,
+      "source": "user"
+    },
+    "yjsUpdate": "AQIDBAU=",
+    "semanticMetadata": {
+      "fingerprint": "simhash64:8f14e45fceea167a",
+      "tags": ["sky", "gradient", "annotation"],
+      "compatibilityMode": false,
+      "schemaVersion": "crdt-operation-envelope/v1"
+    }
+  }
+}
+```
+
 ## 意图残差 R 与阈值
 
 `IntentResidualCalculator` 输出的 R 是一个无量纲归一化分数，范围固定为 `[0, 1]`：
