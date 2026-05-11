@@ -1,6 +1,6 @@
 package com.semantic.sketch.web;
 
-import com.semantic.sketch.IntentResidueCalculator;
+import com.semantic.sketch.semantic.IntentResidualCalculator;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -26,7 +26,7 @@ public class CollaborationSessionHub {
     private final ConflictManager conflictManager;
     private final FactorGraphBuilder factorGraphBuilder;
     private final GreedyInferenceEngine inferenceEngine;
-    private final IntentResidueCalculator residueCalculator;
+    private final IntentResidualCalculator residueCalculator;
     private final double residueThreshold;
     private final Map<String, BranchState> branches = new ConcurrentHashMap<>();
 
@@ -34,7 +34,7 @@ public class CollaborationSessionHub {
                                    ConflictManager conflictManager,
                                    FactorGraphBuilder factorGraphBuilder,
                                    GreedyInferenceEngine inferenceEngine,
-                                   IntentResidueCalculator residueCalculator,
+                                   IntentResidualCalculator residueCalculator,
                                    double residueThreshold) {
         this.fingerprintService = Objects.requireNonNull(fingerprintService, "fingerprintService");
         this.conflictManager = Objects.requireNonNull(conflictManager, "conflictManager");
