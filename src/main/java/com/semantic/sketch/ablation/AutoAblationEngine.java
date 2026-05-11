@@ -47,7 +47,8 @@ public class AutoAblationEngine {
                 seed == null ? "system" : seed.getActorId());
         shadowStore.save(branchId, decision, metadata);
 
-        if (humanArbiter.accept(branchId, decision)) {
+        HumanArbitrationResult arbitration = humanArbiter.arbitrate(branchId, decision);
+        if (arbitration.acceptsSystemPlan()) {
             shadowStore.clear(branchId);
             return decision;
         }

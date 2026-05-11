@@ -31,6 +31,30 @@
    - 对语义漂移量小于阈值 ε 的连续同作者接受节点进行压缩合并，并在清理前后写入维护元数据保证读取一致性。
    - `MaintenanceReport` 输出删除数、压缩数和跳过原因，当前基于 `InMemoryShadowStore`，后续可切换到 Redis/MVCC 等持久化存储。
 
+
+6. **浏览器验证台与多用户转发**
+   - `CollaborativeEditingWebServer`：基于 JDK `HttpServer` 提供静态页面、REST API 与 Server-Sent Events 实时事件通道。
+   - `CollaborationSessionHub`：在内存中模拟多用户向量时钟、语义指纹生成、并发冲突检测、最优方案计算和人工介入请求。
+   - 前端页面 `src/main/resources/static/index.html`：支持提交编辑、查看冲突提示、处理人工介入请求，并可在多个浏览器窗口间观察实时转发。
+
+
+## 意图残留度 R
+
+`IntentResidualCalculator` 位于 `ablation` 模块，用于把合并结果中“被保留下来的意图”统一映射为 0~1 的量纲：
+
+```text
+R = Σ(accepted_i × semanticWeight_i × entropyWeight_i × roleWeight_i)
+    / Σ(all_i × semanticWeight_i × entropyWeight_i × roleWeight_i)
+```
+
+- `semanticWeight_i`：操作语义重要度，默认值为 1.0，可由上层按操作 ID 传入。
+- `entropyWeight_i`：信息熵权重，默认由操作文本自动归一化估计，也可由上层按操作 ID 传入。
+- `roleWeight_i`：用户角色权重，默认值为 1.0，可按 `actorId` 传入。
+- `R = 1` 表示候选方案完整保留了加权意图；`R = 0` 表示加权意图完全丢失。
+- 阈值方向固定为：当 `R < τ` 时触发 `HumanArbiter`；当 `R >= τ` 时可自动应用最优方案。
+
+`HumanArbiter` 现在返回 `HumanArbitrationResult`，结果类型包括接受系统方案和回溯重做；回溯结果预留 `reason`、`decidedBy`、`rollbackScope` 审计字段，便于后续接入日志恢复与审计系统。
+
 ## 后续建议
 
 - 接入 DJL/ONNX：将 `extractWeightedKeywords` 替换为 embedding + 稀疏投影。
@@ -43,3 +67,12 @@
 ```bash
 mvn test
 ```
+
+启动浏览器验证台：
+
+```bash
+mvn -DskipTests compile
+java -cp target/classes com.semantic.sketch.web.CollaborativeEditingWebServer 8080
+```
+
+如果没有配置 Maven Exec 插件，也可以在 IDE 中直接运行 `com.semantic.sketch.web.CollaborativeEditingWebServer`，然后访问 `http://localhost:8080`。

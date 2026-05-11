@@ -1,7 +1,8 @@
 package com.semantic.sketch;
 
 import com.semantic.sketch.ablation.AutoAblationEngine;
-import com.semantic.sketch.ablation.HumanArbiter;
+import com.semantic.sketch.ablation.HumanArbitrationResult;
+import com.semantic.sketch.ablation.IntentResidualCalculator;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -14,6 +15,7 @@ import com.semantic.sketch.semantic.LightweightSemanticFingerprintService;
 import com.semantic.sketch.semantic.SimHash64;
 import com.semantic.sketch.semantic.SlidingWindowSemanticValidator;
 import com.semantic.sketch.storage.InMemoryShadowStore;
+import com.semantic.sketch.web.CollaborationSessionHub;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.junit.jupiter.api.Test;
@@ -68,7 +70,7 @@ class FrameworkSmokeTest {
                 new FactorGraphBuilder(),
                 new GreedyInferenceEngine(),
                 new InMemoryShadowStore(),
-                (branchId, candidate) -> false
+                (branchId, candidate) -> HumanArbitrationResult.rollback("tester", "reject system plan", branchId)
         );
 
         Message m1 = new Message("1", "a", "insert hello", Map.of("a", 2L), 11L);
@@ -88,8 +90,8 @@ class FrameworkSmokeTest {
                 new ConflictManager(),
                 new FactorGraphBuilder(),
                 new GreedyInferenceEngine(),
-                new IntentResidueCalculator(),
-                (branchId, candidate) -> false,
+                new IntentResidualCalculator(),
+                (branchId, candidate) -> HumanArbitrationResult.rollback("tester", "reject system plan", branchId),
                 new ShadowStoreHistoryRecoveryService(new InMemoryShadowStore() {{
                     save("master", new MergeDecision(List.of(), List.of(), -1.0, List.of()));
                 }}),
@@ -101,6 +103,45 @@ class FrameworkSmokeTest {
 
         MergeDecision result = orchestrator.orchestrate("master", incoming, List.of(pending));
         assertEquals(-1.0, result.score());
+    }
+
+
+    @Test
+    void intentResidual_usesSemanticEntropyAndRoleWeights() {
+        IntentResidualCalculator calculator = new IntentResidualCalculator();
+        Message accepted = new Message("a", "owner", "preserve high value semantic intent", Map.of("owner", 1L), 1L);
+        Message rejected = new Message("b", "guest", "drop low value edit", Map.of("guest", 1L), 2L);
+        MergeDecision decision = new MergeDecision(List.of(accepted), List.of(rejected), 0.0d, List.of());
+
+        double residue = calculator.calculate(
+                decision,
+                Map.of("a", 2.0d, "b", 1.0d),
+                Map.of("a", 1.0d, "b", 1.0d),
+                Map.of("owner", 2.0d, "guest", 1.0d)
+        );
+
+        assertEquals(0.8d, residue, 0.0001d);
+    }
+
+    @Test
+    void collaborationHub_promptsHumanInterventionForConcurrentEdits() {
+        CollaborationSessionHub hub = new CollaborationSessionHub(
+                new LightweightSemanticFingerprintService(),
+                new ConflictManager(),
+                new FactorGraphBuilder(),
+                new GreedyInferenceEngine(),
+                new IntentResidualCalculator(),
+                0.80d
+        );
+
+        CollaborationSessionHub.HubResult first = hub.submit("master", "alice", "replace title with semantic sketch");
+        CollaborationSessionHub.HubResult second = hub.submit("master", "bob", "replace title with collaborative sketch");
+
+        assertEquals("applied", first.type());
+        assertEquals("human_intervention_required", second.type());
+        assertFalse(second.requestId().isBlank());
+        assertEquals(1, second.acceptedOps().size());
+        assertEquals(1, second.rejectedOps().size());
     }
 
     @Test
