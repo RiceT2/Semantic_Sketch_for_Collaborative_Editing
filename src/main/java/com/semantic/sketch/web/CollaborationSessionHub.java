@@ -212,9 +212,12 @@ public class CollaborationSessionHub {
 
     private Map<String, ?> semanticTripleView(SemanticTriple triple) {
         return Map.of(
+                "operationType", triple.operationType(),
                 "intent", triple.intent(),
+                "target", triple.target(),
                 "precondition", triple.precondition(),
-                "impactScope", triple.impactScope()
+                "impactScope", triple.impactScope(),
+                "polarity", triple.polarity()
         );
     }
 
@@ -234,7 +237,23 @@ public class CollaborationSessionHub {
                 operationType == CrdtOperationType.DELETE ? safePayload : null,
                 safePayload,
                 null,
-                fingerprintService.fingerprint(safePayload),
+                fingerprintService.fingerprint(new CrdtOperationEnvelope(
+                        "semantic-preview",
+                        actorId == null || actorId.isBlank() ? "anonymous" : actorId,
+                        branchId == null || branchId.isBlank() ? "master" : branchId,
+                        operationType,
+                        Map.of(),
+                        null,
+                        null,
+                        null,
+                        operationType == CrdtOperationType.DELETE ? null : safePayload,
+                        operationType == CrdtOperationType.DELETE ? safePayload : null,
+                        safePayload,
+                        null,
+                        0L,
+                        List.of(),
+                        Instant.now()
+                )),
                 List.of(),
                 Instant.now()
         );
@@ -244,7 +263,7 @@ public class CollaborationSessionHub {
         String intentText = envelope.getIntentText() == null || envelope.getIntentText().isBlank()
                 ? envelope.toMessage().getPayload()
                 : envelope.getIntentText();
-        return new CrdtOperationEnvelope(
+        CrdtOperationEnvelope normalizedEnvelope = new CrdtOperationEnvelope(
                 envelope.getOpId(),
                 envelope.getActorId(),
                 envelope.getBranchId() == null || envelope.getBranchId().isBlank() ? "master" : envelope.getBranchId(),
@@ -257,9 +276,28 @@ public class CollaborationSessionHub {
                 envelope.getDeletedTextPreview(),
                 intentText,
                 envelope.getYjsUpdateBase64(),
-                fingerprintService.fingerprint(intentText),
+                0L,
                 envelope.getSemanticTriples(),
                 envelope.getCreatedAt()
+        );
+        return new CrdtOperationEnvelope(
+                normalizedEnvelope.getOpId(),
+                normalizedEnvelope.getActorId(),
+                normalizedEnvelope.getBranchId(),
+                normalizedEnvelope.getOperationType(),
+                normalizedEnvelope.getVectorClock(),
+                normalizedEnvelope.getTargetPath(),
+                normalizedEnvelope.getFromIndex(),
+                normalizedEnvelope.getToIndex(),
+                normalizedEnvelope.getInsertedText(),
+                normalizedEnvelope.getDeletedTextPreview(),
+                normalizedEnvelope.getIntentText(),
+                normalizedEnvelope.getYjsUpdateBase64(),
+                fingerprintService.fingerprint(normalizedEnvelope),
+                normalizedEnvelope.getSemanticTriples().isEmpty()
+                        ? fingerprintService.extractTriples(normalizedEnvelope)
+                        : normalizedEnvelope.getSemanticTriples(),
+                normalizedEnvelope.getCreatedAt()
         );
     }
 

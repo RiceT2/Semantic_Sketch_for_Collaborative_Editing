@@ -192,9 +192,12 @@ public class CollaborativeEditingWebServer {
         for (Object item : items) {
             if (item instanceof Map<?, ?> triple) {
                 triples.add(new SemanticTriple(
+                        valueOrDefault(stringValue(triple.get("operationType")), "UNKNOWN"),
                         valueOrDefault(stringValue(triple.get("intent")), "unspecified intent"),
+                        valueOrDefault(stringValue(triple.get("target")), "unspecified target"),
                         valueOrDefault(stringValue(triple.get("precondition")), "unspecified precondition"),
-                        valueOrDefault(stringValue(triple.get("impactScope")), "unspecified impact")
+                        valueOrDefault(stringValue(triple.get("impactScope")), "unspecified impact"),
+                        valueOrDefault(stringValue(triple.get("polarity")), "neutral")
                 ));
             }
         }
