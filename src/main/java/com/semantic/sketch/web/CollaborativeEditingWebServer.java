@@ -150,7 +150,7 @@ public class CollaborativeEditingWebServer {
         String insertedText = stringValue(request.get("insertedText"));
         String deletedTextPreview = stringValue(request.get("deletedTextPreview"));
         if (request.get("operationType") == null) {
-            insertedText = operationType == CrdtOperationType.INSERT ? payload : insertedText;
+            insertedText = operationType == CrdtOperationType.DELETE ? insertedText : payload;
             deletedTextPreview = operationType == CrdtOperationType.DELETE ? payload : deletedTextPreview;
         }
         return new CrdtOperationEnvelope(
