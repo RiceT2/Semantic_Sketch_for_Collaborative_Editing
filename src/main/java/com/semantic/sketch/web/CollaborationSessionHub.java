@@ -5,12 +5,16 @@ import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
 import com.semantic.sketch.ablation.MergeDecision;
+import com.semantic.sketch.crdt.CrdtOperationEnvelope;
+import com.semantic.sketch.crdt.CrdtOperationType;
 import com.semantic.sketch.crdt.Message;
+import com.semantic.sketch.model.SemanticTriple;
 import com.semantic.sketch.semantic.SemanticFingerprintService;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,22 +49,22 @@ public class CollaborationSessionHub {
     }
 
     public synchronized HubResult submit(String branchId, String actorId, String payload) {
-        BranchState state = branch(branchId);
-        long actorTick = state.actorClock.merge(actorId, 1L, Long::sum);
-        Message incoming = new Message(
-                "op-" + UUID.randomUUID(),
-                actorId,
-                payload,
-                Map.of(actorId, actorTick),
-                fingerprintService.fingerprint(payload)
-        );
+        return submit(defaultEnvelope(branchId, actorId, payload));
+    }
+
+    public synchronized HubResult submit(CrdtOperationEnvelope envelope) {
+        BranchState state = branch(envelope.getBranchId());
+        long actorTick = state.actorClock.merge(envelope.getActorId(), 1L, Long::sum);
+        CrdtOperationEnvelope stampedEnvelope = stampEnvelope(envelope, Map.of(envelope.getActorId(), actorTick));
+        Message incoming = stampedEnvelope.toMessage();
+        state.operationEnvelopes.put(incoming.getOpId(), stampedEnvelope);
 
         List<Message> concurrent = state.operations.stream()
                 .filter(existing -> conflictManager.isConcurrent(incoming, existing))
                 .toList();
         if (concurrent.isEmpty()) {
             state.operations.add(incoming);
-            return HubResult.applied(branchId, incoming, List.of(incoming), List.of(), 1.0d, 1.0d,
+            return HubResult.applied(stampedEnvelope.getBranchId(), incoming, List.of(incoming), List.of(), 1.0d, 1.0d,
                     "未发现并发语义冲突，操作已直接应用。", null);
         }
 
@@ -72,13 +76,13 @@ public class CollaborationSessionHub {
         boolean requiresHuman = residue < residueThreshold || !decision.rejectedOps().isEmpty();
         if (!requiresHuman) {
             applyDecision(state, decision);
-            return HubResult.applied(branchId, incoming, decision.acceptedOps(), decision.rejectedOps(), decision.score(), residue,
+            return HubResult.applied(stampedEnvelope.getBranchId(), incoming, decision.acceptedOps(), decision.rejectedOps(), decision.score(), residue,
                     "检测到并发但最优方案残留度达标，系统已自动应用。", null);
         }
 
         String requestId = "hr-" + UUID.randomUUID();
-        state.pendingRequests.put(requestId, new InterventionRequest(requestId, branchId, incoming, decision, residue, Instant.now()));
-        return HubResult.humanRequired(branchId, incoming, decision.acceptedOps(), decision.rejectedOps(), decision.score(), residue,
+        state.pendingRequests.put(requestId, new InterventionRequest(requestId, stampedEnvelope.getBranchId(), incoming, decision, residue, Instant.now()));
+        return HubResult.humanRequired(stampedEnvelope.getBranchId(), incoming, decision.acceptedOps(), decision.rejectedOps(), decision.score(), residue,
                 "检测到并发语义冲突且意图残留度低于阈值，已发起人工介入请求。", requestId);
     }
 
@@ -100,7 +104,7 @@ public class CollaborationSessionHub {
         BranchState state = branch(branchId);
         return Map.of(
                 "branchId", branchId,
-                "operations", state.operations.stream().map(this::messageView).toList(),
+                "operations", state.operations.stream().map(message -> operationView(branchId, message)).toList(),
                 "pendingRequests", state.pendingRequests.values().stream().map(this::requestView).toList()
         );
     }
@@ -124,9 +128,9 @@ public class CollaborationSessionHub {
     private Map<String, ?> requestView(InterventionRequest request) {
         return Map.of(
                 "requestId", request.requestId(),
-                "incoming", messageView(request.incoming()),
-                "acceptedOps", request.decision().acceptedOps().stream().map(this::messageView).toList(),
-                "rejectedOps", request.decision().rejectedOps().stream().map(this::messageView).toList(),
+                "incoming", operationView(request.branchId(), request.incoming()),
+                "acceptedOps", request.decision().acceptedOps().stream().map(message -> operationView(request.branchId(), message)).toList(),
+                "rejectedOps", request.decision().rejectedOps().stream().map(message -> operationView(request.branchId(), message)).toList(),
                 "residue", request.residue(),
                 "createdAt", request.createdAt().toString()
         );
@@ -140,26 +144,105 @@ public class CollaborationSessionHub {
         view.put("requestId", result.requestId());
         view.put("score", result.score());
         view.put("residue", result.residue());
-        view.put("incoming", result.incoming() == null ? null : messageView(result.incoming()));
-        view.put("acceptedOps", result.acceptedOps().stream().map(this::messageView).toList());
-        view.put("rejectedOps", result.rejectedOps().stream().map(this::messageView).toList());
+        view.put("incoming", result.incoming() == null ? null : operationView(result.branchId(), result.incoming()));
+        view.put("acceptedOps", result.acceptedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
+        view.put("rejectedOps", result.rejectedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
         view.put("snapshot", snapshot(result.branchId()));
         return view;
     }
 
-    private Map<String, ?> messageView(Message message) {
+    private Map<String, ?> operationView(String branchId, Message message) {
+        CrdtOperationEnvelope envelope = branch(branchId).operationEnvelopes.get(message.getOpId());
+        if (envelope == null) {
+            envelope = CrdtOperationEnvelope.fromMessage(message, branchId, inferOperationType(message.getPayload()));
+        }
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("opId", message.getOpId());
+        view.put("actorId", message.getActorId());
+        view.put("payload", message.getPayload());
+        view.put("vectorClock", message.getVectorClock());
+        view.put("semanticFingerprint", Long.toUnsignedString(message.getSemanticFingerprint()));
+        view.put("operationType", envelope.getOperationType().toJsonValue());
+        view.put("targetPath", envelope.getTargetPath());
+        view.put("fromIndex", envelope.getFromIndex());
+        view.put("toIndex", envelope.getToIndex());
+        view.put("intentText", envelope.getIntentText());
+        view.put("semanticTriples", envelope.getSemanticTriples().stream().map(this::semanticTripleView).toList());
+        boolean hasYjsUpdateBase64 = envelope.getYjsUpdateBase64() != null && !envelope.getYjsUpdateBase64().isBlank();
+        view.put("hasYjsUpdateBase64", hasYjsUpdateBase64);
+        view.put("yjsUpdateBase64Present", hasYjsUpdateBase64);
+        return view;
+    }
+
+    private Map<String, ?> semanticTripleView(SemanticTriple triple) {
         return Map.of(
-                "opId", message.getOpId(),
-                "actorId", message.getActorId(),
-                "payload", message.getPayload(),
-                "vectorClock", message.getVectorClock(),
-                "semanticFingerprint", Long.toUnsignedString(message.getSemanticFingerprint())
+                "intent", triple.intent(),
+                "precondition", triple.precondition(),
+                "impactScope", triple.impactScope()
         );
+    }
+
+    private CrdtOperationEnvelope defaultEnvelope(String branchId, String actorId, String payload) {
+        String safePayload = payload == null || payload.isBlank() ? "empty edit" : payload;
+        CrdtOperationType operationType = inferOperationType(safePayload);
+        return new CrdtOperationEnvelope(
+                "op-" + UUID.randomUUID(),
+                actorId == null || actorId.isBlank() ? "anonymous" : actorId,
+                branchId == null || branchId.isBlank() ? "master" : branchId,
+                operationType,
+                Map.of(),
+                null,
+                null,
+                null,
+                operationType == CrdtOperationType.INSERT ? safePayload : null,
+                operationType == CrdtOperationType.DELETE ? safePayload : null,
+                safePayload,
+                null,
+                fingerprintService.fingerprint(safePayload),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private CrdtOperationEnvelope stampEnvelope(CrdtOperationEnvelope envelope, Map<String, Long> vectorClock) {
+        String intentText = envelope.getIntentText() == null || envelope.getIntentText().isBlank()
+                ? envelope.toMessage().getPayload()
+                : envelope.getIntentText();
+        return new CrdtOperationEnvelope(
+                envelope.getOpId(),
+                envelope.getActorId(),
+                envelope.getBranchId() == null || envelope.getBranchId().isBlank() ? "master" : envelope.getBranchId(),
+                envelope.getOperationType(),
+                vectorClock,
+                envelope.getTargetPath(),
+                envelope.getFromIndex(),
+                envelope.getToIndex(),
+                envelope.getInsertedText(),
+                envelope.getDeletedTextPreview(),
+                intentText,
+                envelope.getYjsUpdateBase64(),
+                fingerprintService.fingerprint(intentText),
+                envelope.getSemanticTriples(),
+                envelope.getCreatedAt()
+        );
+    }
+
+    private CrdtOperationType inferOperationType(String payload) {
+        if (payload != null) {
+            String firstToken = payload.strip().split("\\s+", 2)[0];
+            try {
+                return CrdtOperationType.fromString(firstToken);
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the compatibility default used by the legacy text payload path.
+            }
+        }
+        return CrdtOperationType.REPLACE;
     }
 
     private static final class BranchState {
         private final List<Message> operations = new ArrayList<>();
         private final Map<String, Long> actorClock = new ConcurrentHashMap<>();
+        private final Map<String, CrdtOperationEnvelope> operationEnvelopes = new HashMap<>();
         private final Map<String, InterventionRequest> pendingRequests = new LinkedHashMap<>();
     }
 
