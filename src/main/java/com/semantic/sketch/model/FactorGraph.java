@@ -24,6 +24,7 @@ public record FactorGraph(List<Message> nodes,
                                 double decayLambda,
                                 double constraintThreshold,
                                 double semanticDistanceWeight,
-                                double constraintSatisfactionWeight) {
+                                double constraintSatisfactionWeight,
+                                double structuralRiskWeight) {
     }
 }

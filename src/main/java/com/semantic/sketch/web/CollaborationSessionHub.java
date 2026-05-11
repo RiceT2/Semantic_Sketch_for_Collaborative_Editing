@@ -93,7 +93,12 @@ public class CollaborationSessionHub {
         List<Message> candidates = new ArrayList<>(concurrent);
         candidates.add(incoming);
         candidates.sort(Comparator.comparing(Message::getOpId));
-        MergeDecision decision = inferenceEngine.infer(factorGraphBuilder.build(candidates));
+        List<CrdtOperationEnvelope> candidateEnvelopes = candidates.stream()
+                .map(message -> state.operationEnvelopes.getOrDefault(
+                        message.getOpId(),
+                        CrdtOperationEnvelope.fromMessage(message, stampedEnvelope.getBranchId(), inferOperationType(message.getPayload()))))
+                .toList();
+        MergeDecision decision = inferenceEngine.infer(factorGraphBuilder.buildFromEnvelopes(candidateEnvelopes));
         double residue = residueCalculator.calculate(decision);
         boolean requiresHuman = residue < residueThreshold || !decision.rejectedOps().isEmpty();
         if (!requiresHuman) {
