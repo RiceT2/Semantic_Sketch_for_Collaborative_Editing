@@ -1,8 +1,10 @@
 package com.semantic.sketch.web;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 final class JsonSupport {
@@ -10,45 +12,20 @@ final class JsonSupport {
     }
 
     static Map<String, String> parseObject(String json) {
+        Map<String, Object> parsed = parseObjectValues(json);
         Map<String, String> values = new LinkedHashMap<>();
-        if (json == null) {
-            return values;
-        }
-        int index = skipWhitespace(json, 0);
-        if (index >= json.length() || json.charAt(index) != '{') {
-            return values;
-        }
-        index++;
-        while (index < json.length()) {
-            index = skipWhitespace(json, index);
-            if (index < json.length() && json.charAt(index) == '}') {
-                break;
-            }
-            ParsedString key = readString(json, index);
-            index = skipWhitespace(json, key.nextIndex());
-            if (index >= json.length() || json.charAt(index) != ':') {
-                break;
-            }
-            index = skipWhitespace(json, index + 1);
-            String value;
-            if (index < json.length() && json.charAt(index) == '"') {
-                ParsedString parsedValue = readString(json, index);
-                value = parsedValue.value();
-                index = parsedValue.nextIndex();
-            } else {
-                int start = index;
-                while (index < json.length() && json.charAt(index) != ',' && json.charAt(index) != '}') {
-                    index++;
-                }
-                value = json.substring(start, index).trim();
-            }
-            values.put(key.value(), value);
-            index = skipWhitespace(json, index);
-            if (index < json.length() && json.charAt(index) == ',') {
-                index++;
-            }
-        }
+        parsed.forEach((key, value) -> values.put(key, value == null ? null : String.valueOf(value)));
         return values;
+    }
+
+    static Map<String, Object> parseObjectValues(String json) {
+        Object value = new Parser(json).parseValue();
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            map.forEach((key, mapValue) -> values.put(String.valueOf(key), mapValue));
+            return values;
+        }
+        return new LinkedHashMap<>();
     }
 
     static String stringify(Map<String, ?> object) {
@@ -97,37 +74,140 @@ final class JsonSupport {
         }
     }
 
-    private static ParsedString readString(String text, int start) {
-        StringBuilder builder = new StringBuilder();
-        int index = start + 1;
-        while (index < text.length()) {
-            char current = text.charAt(index++);
-            if (current == '"') {
-                break;
+    private static final class Parser {
+        private final String text;
+        private int index;
+
+        private Parser(String text) {
+            this.text = text == null ? "" : text;
+        }
+
+        private Object parseValue() {
+            skipWhitespace();
+            if (index >= text.length()) {
+                return null;
             }
-            if (current == '\\' && index < text.length()) {
-                char escaped = text.charAt(index++);
-                builder.append(switch (escaped) {
-                    case 'n' -> '\n';
-                    case 'r' -> '\r';
-                    case 't' -> '\t';
-                    case '"' -> '"';
-                    case '\\' -> '\\';
-                    default -> escaped;
-                });
-            } else {
-                builder.append(current);
+            char current = text.charAt(index);
+            if (current == '{') {
+                return parseObject();
+            }
+            if (current == '[') {
+                return parseArray();
+            }
+            if (current == '"') {
+                return parseString();
+            }
+            if (text.startsWith("true", index)) {
+                index += 4;
+                return true;
+            }
+            if (text.startsWith("false", index)) {
+                index += 5;
+                return false;
+            }
+            if (text.startsWith("null", index)) {
+                index += 4;
+                return null;
+            }
+            return parseLiteral();
+        }
+
+        private Map<String, Object> parseObject() {
+            Map<String, Object> values = new LinkedHashMap<>();
+            index++;
+            while (index < text.length()) {
+                skipWhitespace();
+                if (index < text.length() && text.charAt(index) == '}') {
+                    index++;
+                    break;
+                }
+                if (index >= text.length() || text.charAt(index) != '"') {
+                    break;
+                }
+                String key = parseString();
+                skipWhitespace();
+                if (index >= text.length() || text.charAt(index) != ':') {
+                    break;
+                }
+                index++;
+                values.put(key, parseValue());
+                skipWhitespace();
+                if (index < text.length() && text.charAt(index) == ',') {
+                    index++;
+                }
+            }
+            return values;
+        }
+
+        private List<Object> parseArray() {
+            List<Object> values = new ArrayList<>();
+            index++;
+            while (index < text.length()) {
+                skipWhitespace();
+                if (index < text.length() && text.charAt(index) == ']') {
+                    index++;
+                    break;
+                }
+                values.add(parseValue());
+                skipWhitespace();
+                if (index < text.length() && text.charAt(index) == ',') {
+                    index++;
+                }
+            }
+            return values;
+        }
+
+        private String parseString() {
+            StringBuilder builder = new StringBuilder();
+            index++;
+            while (index < text.length()) {
+                char current = text.charAt(index++);
+                if (current == '"') {
+                    break;
+                }
+                if (current == '\\' && index < text.length()) {
+                    char escaped = text.charAt(index++);
+                    builder.append(switch (escaped) {
+                        case 'n' -> '\n';
+                        case 'r' -> '\r';
+                        case 't' -> '\t';
+                        case '"' -> '"';
+                        case '\\' -> '\\';
+                        default -> escaped;
+                    });
+                } else {
+                    builder.append(current);
+                }
+            }
+            return builder.toString();
+        }
+
+        private Object parseLiteral() {
+            int start = index;
+            while (index < text.length() && ",}]".indexOf(text.charAt(index)) < 0) {
+                index++;
+            }
+            String value = text.substring(start, index).trim();
+            if (value.isEmpty()) {
+                return null;
+            }
+            try {
+                if (value.contains(".") || value.contains("e") || value.contains("E")) {
+                    return Double.parseDouble(value);
+                }
+                return Long.parseLong(value);
+            } catch (NumberFormatException ignored) {
+                return value;
             }
         }
-        return new ParsedString(builder.toString(), index);
+
+        private void skipWhitespace() {
+            while (index < text.length() && Character.isWhitespace(text.charAt(index))) {
+                index++;
+            }
+        }
     }
 
-    private static int skipWhitespace(String text, int index) {
-        while (index < text.length() && Character.isWhitespace(text.charAt(index))) {
-            index++;
-        }
-        return index;
-    }
 
     private static String escape(String text) {
         return text.replace("\\", "\\\\")
@@ -135,8 +215,5 @@ final class JsonSupport {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
-    }
-
-    private record ParsedString(String value, int nextIndex) {
     }
 }

@@ -1,6 +1,9 @@
 package com.semantic.sketch.web;
 
 import com.semantic.sketch.semantic.IntentResidualCalculator;
+import com.semantic.sketch.crdt.CrdtOperationEnvelope;
+import com.semantic.sketch.crdt.CrdtOperationType;
+import com.semantic.sketch.model.SemanticTriple;
 import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
@@ -13,7 +16,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 
 /**
@@ -99,11 +106,9 @@ public class CollaborativeEditingWebServer {
             send(exchange, 405, "application/json", JsonSupport.stringify(Map.of("error", "Method not allowed")));
             return;
         }
-        Map<String, String> request = JsonSupport.parseObject(readBody(exchange));
-        String branchId = valueOrDefault(request.get("branchId"), "master");
-        String actorId = valueOrDefault(request.get("actorId"), "anonymous");
-        String payload = valueOrDefault(request.get("payload"), "empty edit");
-        CollaborationSessionHub.HubResult result = hub.submit(branchId, actorId, payload);
+        Map<String, Object> request = JsonSupport.parseObjectValues(readBody(exchange));
+        CrdtOperationEnvelope envelope = operationEnvelope(request);
+        CollaborationSessionHub.HubResult result = hub.submit(envelope);
         Map<String, ?> view = hub.resultView(result);
         broadcaster.broadcast(result.type(), view);
         if ("human_intervention_required".equals(result.type())) {
@@ -129,7 +134,83 @@ public class CollaborativeEditingWebServer {
 
     private void handleSnapshot(HttpExchange exchange) throws IOException {
         String branchId = valueOrDefault(queryParams(exchange.getRequestURI().getQuery()).get("branchId"), "master");
-        send(exchange, 200, "application/json", JsonSupport.stringify(hub.snapshot(branchId)));
+        Map<String, ?> view = hub.snapshot(branchId);
+        broadcaster.broadcast("snapshot", view);
+        send(exchange, 200, "application/json", JsonSupport.stringify(view));
+    }
+
+    private CrdtOperationEnvelope operationEnvelope(Map<String, Object> request) {
+        String branchId = valueOrDefault(stringValue(request.get("branchId")), "master");
+        String actorId = valueOrDefault(stringValue(request.get("actorId")), "anonymous");
+        String payload = valueOrDefault(stringValue(request.get("payload")), "empty edit");
+        CrdtOperationType operationType = request.get("operationType") == null
+                ? inferCompatibilityOperationType(payload)
+                : CrdtOperationType.fromJsonValue(stringValue(request.get("operationType")));
+        String intentText = valueOrDefault(stringValue(request.get("intentText")), payload);
+        String insertedText = stringValue(request.get("insertedText"));
+        String deletedTextPreview = stringValue(request.get("deletedTextPreview"));
+        if (request.get("operationType") == null) {
+            insertedText = operationType == CrdtOperationType.INSERT ? payload : insertedText;
+            deletedTextPreview = operationType == CrdtOperationType.DELETE ? payload : deletedTextPreview;
+        }
+        return new CrdtOperationEnvelope(
+                valueOrDefault(stringValue(request.get("opId")), "op-" + UUID.randomUUID()),
+                actorId,
+                branchId,
+                operationType,
+                Map.of(),
+                stringValue(request.get("targetPath")),
+                integerValue(request.get("fromIndex")),
+                integerValue(request.get("toIndex")),
+                insertedText,
+                deletedTextPreview,
+                intentText,
+                stringValue(request.get("yjsUpdateBase64")),
+                0L,
+                semanticTriples(request.get("semanticTriples")),
+                Instant.now()
+        );
+    }
+
+    private CrdtOperationType inferCompatibilityOperationType(String payload) {
+        if (payload != null) {
+            String firstToken = payload.strip().split("\\s+", 2)[0];
+            try {
+                return CrdtOperationType.fromString(firstToken);
+            } catch (IllegalArgumentException ignored) {
+                // Preserve legacy free-text payload behavior by emitting a REPLACE envelope.
+            }
+        }
+        return CrdtOperationType.REPLACE;
+    }
+
+    private List<SemanticTriple> semanticTriples(Object value) {
+        if (!(value instanceof List<?> items)) {
+            return List.of();
+        }
+        List<SemanticTriple> triples = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Map<?, ?> triple) {
+                triples.add(new SemanticTriple(
+                        valueOrDefault(stringValue(triple.get("intent")), "unspecified intent"),
+                        valueOrDefault(stringValue(triple.get("precondition")), "unspecified precondition"),
+                        valueOrDefault(stringValue(triple.get("impactScope")), "unspecified impact")
+                ));
+            }
+        }
+        return triples;
+    }
+
+    private Integer integerValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        String text = stringValue(value);
+        return text == null || text.isBlank() ? null : Integer.parseInt(text);
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private Map<String, String> queryParams(String query) {

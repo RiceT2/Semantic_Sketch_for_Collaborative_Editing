@@ -54,6 +54,22 @@
       <option value="owner">owner（高权重）</option>
       <option value="reviewer">reviewer</option>
     </select>
+    <label>操作类型</label>
+    <select id="operationType">
+      <option value="REPLACE">REPLACE</option>
+      <option value="INSERT">INSERT</option>
+      <option value="DELETE">DELETE</option>
+      <option value="FORMAT">FORMAT</option>
+      <option value="MOVE">MOVE</option>
+      <option value="ANNOTATE">ANNOTATE</option>
+    </select>
+    <label>目标路径</label>
+    <input id="targetPath" value="/document/blocks/0">
+    <label>范围（from / to）</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <input id="fromIndex" type="number" value="0">
+      <input id="toIndex" type="number" value="12">
+    </div>
     <label>编辑内容 / 意图</label>
     <textarea id="payload">replace sky with blue gradient</textarea>
     <p style="font-size:13px;color:#5c6b85">提示：分别用 alice 和 bob 快速提交相似编辑，可触发并发冲突与人工介入请求。</p>
@@ -79,7 +95,7 @@
 <script>
 const timeline = document.getElementById('timeline');
 const source = new EventSource('/events');
-['connected','applied','human_intervention_required','conflict_detected','human_decision','system'].forEach(name => {
+['connected','applied','human_intervention_required','conflict_detected','human_decision','snapshot','system'].forEach(name => {
   source.addEventListener(name, event => renderEvent(name, JSON.parse(event.data)));
 });
 source.onopen = () => document.getElementById('status').textContent = 'SSE 已连接';
@@ -89,6 +105,11 @@ async function submitEdit() {
   const body = {
     branchId: branchId.value,
     actorId: actorId.value,
+    operationType: operationType.value,
+    targetPath: targetPath.value,
+    fromIndex: numberOrNull(fromIndex.value),
+    toIndex: numberOrNull(toIndex.value),
+    intentText: payload.value,
     payload: payload.value
   };
   const res = await fetch('/api/operations', { method: 'POST', body: JSON.stringify(body) });
@@ -97,7 +118,11 @@ async function submitEdit() {
 function demo(actor, text) {
   actorId.value = actor;
   payload.value = text;
+  operationType.value = text.split(' ')[0].toUpperCase();
   submitEdit();
+}
+function numberOrNull(value) {
+  return value === '' ? null : Number(value);
 }
 async function humanDecision(requestId, decision) {
   const res = await fetch('/api/human-decision', { method: 'POST', body: JSON.stringify({ branchId: branchId.value, requestId, decision }) });
@@ -110,7 +135,7 @@ async function loadSnapshot() {
 function renderEvent(type, data) {
   const div = document.createElement('div');
   div.className = 'event ' + type;
-  div.innerHTML = `<h3>${label(type)}</h3><p>${data.message || ''}</p>${metrics(data)}${opsLine(data)}`;
+  div.innerHTML = `<h3>${label(type)}</h3><p>${data.message || ''}</p>${operationSummary(data)}${metrics(data)}${opsLine(data)}`;
   timeline.prepend(div);
   if (data.snapshot) updateSnapshot(data.snapshot);
 }
@@ -119,18 +144,31 @@ function metrics(data) {
   return `<p>score=<code>${Number(data.score).toFixed(3)}</code>，R=<code>${Number(data.residue).toFixed(3)}</code>，request=<code>${data.requestId || '-'}</code></p>`;
 }
 function opsLine(data) {
-  const accepted = (data.acceptedOps || []).map(op => op.actorId + ':' + op.payload).join(' | ') || '-';
-  const rejected = (data.rejectedOps || []).map(op => op.actorId + ':' + op.payload).join(' | ') || '-';
+  const accepted = (data.acceptedOps || []).map(formatOperation).join(' | ') || '-';
+  const rejected = (data.rejectedOps || []).map(formatOperation).join(' | ') || '-';
   return `<p>接受：${accepted}</p><p>拒绝：${rejected}</p>`;
 }
+function operationSummary(data) {
+  if (data.incoming) return `<p>当前：${formatOperation(data.incoming)}</p>`;
+  if (data.operations) return `<p>快照操作数：<code>${data.operations.length}</code></p>`;
+  return '';
+}
+function formatOperation(op) {
+  return `${op.actorId}:${op.operationType || '-'} ${op.targetPath || '/'} ${range(op)} ${op.intentText || op.payload || ''}`;
+}
+function range(op) {
+  const from = op.fromIndex ?? '-';
+  const to = op.toIndex ?? '-';
+  return `[${from}, ${to}]`;
+}
 function updateSnapshot(snapshot) {
-  document.getElementById('ops').innerHTML = (snapshot.operations || []).map(op => `<div class="op"><b>${op.actorId}</b> ${op.payload}<br><code>${op.opId}</code></div>`).join('') || '<p>暂无操作</p>';
+  document.getElementById('ops').innerHTML = (snapshot.operations || []).map(op => `<div class="op"><b>${op.actorId}</b> <code>${op.operationType}</code> ${op.targetPath || '/'} ${range(op)}<br>${op.intentText || op.payload}<br><code>${op.opId}</code></div>`).join('') || '<p>暂无操作</p>';
   const requests = snapshot.pendingRequests || [];
   document.getElementById('pending').innerHTML = requests.map(req => `<div class="request"><b>${req.requestId}</b><p>R=${Number(req.residue).toFixed(3)}</p><button onclick="humanDecision('${req.requestId}','accept')">接受最优方案</button><button class="danger" onclick="humanDecision('${req.requestId}','rollback')">回溯</button></div>`).join('') || '<p>暂无请求</p>';
   document.getElementById('humanRequests').innerHTML = document.getElementById('pending').innerHTML;
 }
 function label(type) {
-  return ({connected:'实时通道已连接', applied:'操作已应用', human_intervention_required:'人工介入请求', conflict_detected:'冲突提示', human_decision:'人工决策完成', api_response:'接口响应', system:'系统消息'})[type] || type;
+  return ({connected:'实时通道已连接', applied:'操作已应用', human_intervention_required:'人工介入请求', conflict_detected:'冲突提示', human_decision:'人工决策完成', snapshot:'快照已刷新', api_response:'接口响应', system:'系统消息'})[type] || type;
 }
 loadSnapshot();
 </script>
