@@ -5,8 +5,10 @@ import com.semantic.sketch.ablation.ConflictManager;
 import com.semantic.sketch.ablation.FactorGraphBuilder;
 import com.semantic.sketch.ablation.GreedyInferenceEngine;
 import com.semantic.sketch.ablation.MergeDecision;
+import com.semantic.sketch.crdt.CrdtAdapter;
 import com.semantic.sketch.crdt.CrdtOperationEnvelope;
 import com.semantic.sketch.crdt.CrdtOperationType;
+import com.semantic.sketch.crdt.InMemoryTextCrdtAdapter;
 import com.semantic.sketch.crdt.Message;
 import com.semantic.sketch.model.SemanticTriple;
 import com.semantic.sketch.semantic.SemanticFingerprintService;
@@ -32,6 +34,7 @@ public class CollaborationSessionHub {
     private final GreedyInferenceEngine inferenceEngine;
     private final IntentResidualCalculator residueCalculator;
     private final double residueThreshold;
+    private final CrdtAdapter crdtAdapter;
     private final Map<String, BranchState> branches = new ConcurrentHashMap<>();
 
     public CollaborationSessionHub(SemanticFingerprintService fingerprintService,
@@ -40,12 +43,31 @@ public class CollaborationSessionHub {
                                    GreedyInferenceEngine inferenceEngine,
                                    IntentResidualCalculator residueCalculator,
                                    double residueThreshold) {
+        this(
+                fingerprintService,
+                conflictManager,
+                factorGraphBuilder,
+                inferenceEngine,
+                residueCalculator,
+                residueThreshold,
+                new InMemoryTextCrdtAdapter()
+        );
+    }
+
+    public CollaborationSessionHub(SemanticFingerprintService fingerprintService,
+                                   ConflictManager conflictManager,
+                                   FactorGraphBuilder factorGraphBuilder,
+                                   GreedyInferenceEngine inferenceEngine,
+                                   IntentResidualCalculator residueCalculator,
+                                   double residueThreshold,
+                                   CrdtAdapter crdtAdapter) {
         this.fingerprintService = Objects.requireNonNull(fingerprintService, "fingerprintService");
         this.conflictManager = Objects.requireNonNull(conflictManager, "conflictManager");
         this.factorGraphBuilder = Objects.requireNonNull(factorGraphBuilder, "factorGraphBuilder");
         this.inferenceEngine = Objects.requireNonNull(inferenceEngine, "inferenceEngine");
         this.residueCalculator = Objects.requireNonNull(residueCalculator, "residueCalculator");
         this.residueThreshold = residueThreshold;
+        this.crdtAdapter = Objects.requireNonNull(crdtAdapter, "crdtAdapter");
     }
 
     public synchronized HubResult submit(String branchId, String actorId, String payload) {
@@ -63,7 +85,7 @@ public class CollaborationSessionHub {
                 .filter(existing -> conflictManager.isConcurrent(incoming, existing))
                 .toList();
         if (concurrent.isEmpty()) {
-            state.operations.add(incoming);
+            applyAcceptedEnvelope(state, stampedEnvelope);
             return HubResult.applied(stampedEnvelope.getBranchId(), incoming, List.of(incoming), List.of(), 1.0d, 1.0d,
                     "未发现并发语义冲突，操作已直接应用。", null);
         }
@@ -102,9 +124,13 @@ public class CollaborationSessionHub {
 
     public synchronized Map<String, ?> snapshot(String branchId) {
         BranchState state = branch(branchId);
+        String normalizedBranchId = branchId == null || branchId.isBlank() ? "master" : branchId;
         return Map.of(
-                "branchId", branchId,
-                "operations", state.operations.stream().map(message -> operationView(branchId, message)).toList(),
+                "branchId", normalizedBranchId,
+                "document", crdtAdapter.renderDocument(normalizedBranchId),
+                "crdt", crdtAdapter.snapshot(normalizedBranchId),
+                "stateVector", crdtAdapter.stateVector(normalizedBranchId),
+                "operations", state.operations.stream().map(message -> operationView(normalizedBranchId, message)).toList(),
                 "pendingRequests", state.pendingRequests.values().stream().map(this::requestView).toList()
         );
     }
@@ -116,9 +142,19 @@ public class CollaborationSessionHub {
         for (Message accepted : decision.acceptedOps()) {
             boolean exists = state.operations.stream().anyMatch(existing -> existing.getOpId().equals(accepted.getOpId()));
             if (!exists) {
-                state.operations.add(accepted);
+                CrdtOperationEnvelope envelope = state.operationEnvelopes.get(accepted.getOpId());
+                if (envelope != null) {
+                    applyAcceptedEnvelope(state, envelope);
+                } else {
+                    state.operations.add(accepted);
+                }
             }
         }
+    }
+
+    private void applyAcceptedEnvelope(BranchState state, CrdtOperationEnvelope envelope) {
+        crdtAdapter.apply(envelope);
+        state.operations.add(envelope.toMessage());
     }
 
     private BranchState branch(String branchId) {
@@ -194,7 +230,7 @@ public class CollaborationSessionHub {
                 null,
                 null,
                 null,
-                operationType == CrdtOperationType.INSERT ? safePayload : null,
+                operationType == CrdtOperationType.DELETE ? null : safePayload,
                 operationType == CrdtOperationType.DELETE ? safePayload : null,
                 safePayload,
                 null,
