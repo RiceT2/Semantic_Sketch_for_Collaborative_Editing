@@ -42,9 +42,10 @@ public enum CrdtOperationType {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("CRDT operation type must not be blank");
         }
+        // Normalize by removing non-alphanumeric characters and upper-casing.
+        // This ensures inputs like "snap-shot", "snap shot", "snap_shot" all map to SNAPSHOT.
         String normalized = value.trim()
-                .replace('-', '_')
-                .replace(' ', '_')
+                .replaceAll("[^A-Za-z0-9]", "")
                 .toUpperCase(Locale.ROOT);
         return Arrays.stream(values())
                 .filter(type -> type.name().equals(normalized))

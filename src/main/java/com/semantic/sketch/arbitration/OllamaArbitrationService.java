@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,9 +60,11 @@ public class OllamaArbitrationService {
             return parseAndMap(branchId, response.body());
         } catch (ConnectException e) {
             return ArbitrationOutput.askHumanFallback("OLLAMA_UNAVAILABLE");
-        } catch (java.net.http.HttpTimeoutException | TimeoutException e) {
+        } catch (java.net.http.HttpTimeoutException e) {
             return ArbitrationOutput.askHumanFallback("OLLAMA_TIMEOUT");
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
+            return ArbitrationOutput.askHumanFallback("OLLAMA_IO_ERROR");
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ArbitrationOutput.askHumanFallback("OLLAMA_IO_ERROR");
         } catch (RuntimeException e) {

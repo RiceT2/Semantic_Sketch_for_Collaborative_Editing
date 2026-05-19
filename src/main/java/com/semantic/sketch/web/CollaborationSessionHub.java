@@ -131,6 +131,8 @@ public class CollaborationSessionHub {
         BranchState state = branch(branchId);
         String normalizedBranchId = branchId == null || branchId.isBlank() ? "master" : branchId;
         String rawCrdtDocument = crdtAdapter.renderDocument(normalizedBranchId);
+        List<Map<String, Object>> operationsList = state.operations.stream().map(message -> operationView(normalizedBranchId, message)).toList();
+        List<Map<String, Object>> pendingList = (List<Map<String, Object>>) state.pendingRequests.values().stream().map((java.util.function.Function<? super InterventionRequest, ? extends Map<String, Object>>) this::requestView).toList();
         return Map.of(
                 "branchId", normalizedBranchId,
                 "document", crdtAdapter.renderDocument(normalizedBranchId),
@@ -138,8 +140,8 @@ public class CollaborationSessionHub {
                 "semanticMergedDocument", buildSemanticMergedDocument(state, normalizedBranchId),
                 "crdt", crdtAdapter.snapshot(normalizedBranchId),
                 "stateVector", crdtAdapter.stateVector(normalizedBranchId),
-                "operations", state.operations.stream().map(message -> operationView(normalizedBranchId, message)).toList(),
-                "pendingRequests", state.pendingRequests.values().stream().map(this::requestView).toList()
+                "operations", operationsList,
+                "pendingRequests", pendingList
         );
     }
 
@@ -169,12 +171,14 @@ public class CollaborationSessionHub {
         return branches.computeIfAbsent(branchId == null || branchId.isBlank() ? "master" : branchId, ignored -> new BranchState());
     }
 
-    private Map<String, ?> requestView(InterventionRequest request) {
+    private Map<String, Object> requestView(InterventionRequest request) {
+        List<Map<String, Object>> accepted = request.decision().acceptedOps().stream().map(message -> operationView(request.branchId(), message)).toList();
+        List<Map<String, Object>> rejected = request.decision().rejectedOps().stream().map(message -> operationView(request.branchId(), message)).toList();
         return Map.of(
                 "requestId", request.requestId(),
                 "incoming", operationView(request.branchId(), request.incoming()),
-                "acceptedOps", request.decision().acceptedOps().stream().map(message -> operationView(request.branchId(), message)).toList(),
-                "rejectedOps", request.decision().rejectedOps().stream().map(message -> operationView(request.branchId(), message)).toList(),
+                "acceptedOps", accepted,
+                "rejectedOps", rejected,
                 "residue", request.residue(),
                 "createdAt", request.createdAt().toString()
         );
@@ -189,18 +193,20 @@ public class CollaborationSessionHub {
         view.put("score", result.score());
         view.put("residue", result.residue());
         view.put("incoming", result.incoming() == null ? null : operationView(result.branchId(), result.incoming()));
-        view.put("acceptedOps", result.acceptedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
-        view.put("rejectedOps", result.rejectedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
+        List<Map<String, Object>> acceptedOpsList = result.acceptedOps().stream().map(message -> operationView(result.branchId(), message)).toList();
+        List<Map<String, Object>> rejectedOpsList = result.rejectedOps().stream().map(message -> operationView(result.branchId(), message)).toList();
+        view.put("acceptedOps", acceptedOpsList);
+        view.put("rejectedOps", rejectedOpsList);
         view.put("arbitrationExplanation", arbitrationExplanation(result));
         view.put("snapshot", snapshot(result.branchId()));
         return view;
     }
 
     private Map<String, ?> arbitrationExplanation(HubResult result) {
-        List<Map<String, ?>> accepted = result.acceptedOps().stream()
+        List<Map<String, Object>> accepted = result.acceptedOps().stream()
                 .map(message -> operationView(result.branchId(), message))
                 .toList();
-        List<Map<String, ?>> suppressed = result.rejectedOps().stream()
+        List<Map<String, Object>> suppressed = result.rejectedOps().stream()
                 .map(message -> operationView(result.branchId(), message))
                 .toList();
         String decisionSource = "applied".equals(result.type()) ? "system-auto" : "human-required";
@@ -235,7 +241,7 @@ public class CollaborationSessionHub {
         return projected.isBlank() ? crdtAdapter.renderDocument(branchId) : projected;
     }
 
-    private Map<String, ?> operationView(String branchId, Message message) {
+    private Map<String, Object> operationView(String branchId, Message message) {
         CrdtOperationEnvelope envelope = branch(branchId).operationEnvelopes.get(message.getOpId());
         if (envelope == null) {
             envelope = CrdtOperationEnvelope.fromMessage(message, branchId, inferOperationType(message.getPayload()));

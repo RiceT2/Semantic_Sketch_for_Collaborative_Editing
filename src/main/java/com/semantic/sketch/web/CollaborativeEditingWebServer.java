@@ -143,9 +143,10 @@ public class CollaborativeEditingWebServer {
         String branchId = valueOrDefault(stringValue(request.get("branchId")), "master");
         String actorId = valueOrDefault(stringValue(request.get("actorId")), "anonymous");
         String payload = valueOrDefault(stringValue(request.get("payload")), "empty edit");
-        CrdtOperationType operationType = request.get("operationType") == null
-                ? inferCompatibilityOperationType(payload)
-                : CrdtOperationType.fromJsonValue(stringValue(request.get("operationType")));
+        // Always infer operation type on the server side from payload/Yjs update.
+        // We intentionally ignore a client-supplied operationType selection to
+        // prevent clients from misrepresenting the actual edit semantics.
+        CrdtOperationType operationType = inferCompatibilityOperationType(payload);
         String intentText = valueOrDefault(stringValue(request.get("intentText")), payload);
         String insertedText = stringValue(request.get("insertedText"));
         String deletedTextPreview = stringValue(request.get("deletedTextPreview"));
@@ -174,7 +175,7 @@ public class CollaborativeEditingWebServer {
 
     private CrdtOperationType inferCompatibilityOperationType(String payload) {
         if (payload != null) {
-            String firstToken = payload.strip().split("\\s+", 2)[0];
+            String firstToken = payload.strip().split("\s+", 2)[0];
             try {
                 return CrdtOperationType.fromString(firstToken);
             } catch (IllegalArgumentException ignored) {
