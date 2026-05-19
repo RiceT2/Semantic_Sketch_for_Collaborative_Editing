@@ -176,6 +176,55 @@ class FrameworkSmokeTest {
         assertTrue(store.getMetadata("master").orElseThrow().semanticTriples().get(0).precondition().contains("deleted=1"));
     }
 
+
+    @Test
+    void graphMaintenance_doesNotCompressUnrelatedOperations() {
+        InMemoryShadowStore store = new InMemoryShadowStore();
+        Message left = new Message("x1", "alice", "draw sky", Map.of("trunk", 1L, "alice", 1L), 0b1001L);
+        Message right = new Message("x2", "bob", "draw tree", Map.of("trunk", 1L, "bob", 1L), 0b1001L);
+        store.save("master", new MergeDecision(List.of(left, right), List.of(), 0.9d, List.of()));
+
+        GraphMaintenanceService maintenance = new GraphMaintenanceService(
+                store,
+                "trunk",
+                Map.of("trunk", 1L, "alice", 1L, "bob", 1L),
+                0.2d
+        );
+
+        MaintenanceReport report = maintenance.runOnce(Set.of("master"));
+        MergeDecision maintained = store.get("master").orElseThrow();
+
+        assertEquals(0, report.compressedCount());
+        assertEquals(2, maintained.acceptedOps().size());
+        assertEquals("x1", maintained.acceptedOps().get(0).getOpId());
+        assertEquals("x2", maintained.acceptedOps().get(1).getOpId());
+    }
+
+    @Test
+    void graphMaintenance_compressionPreservesRenderedDocument() {
+        InMemoryShadowStore store = new InMemoryShadowStore();
+        Message accepted1 = new Message("c1", "alice", "line-1", Map.of("trunk", 1L, "alice", 1L), 0b1001L);
+        Message accepted2 = new Message("c2", "alice", "line-2", Map.of("trunk", 1L, "alice", 2L), 0b1001L);
+        List<Message> originalOps = List.of(accepted1, accepted2);
+        String originalRender = renderDocument(originalOps);
+        store.save("master", new MergeDecision(originalOps, List.of(), 0.9d, List.of()));
+
+        GraphMaintenanceService maintenance = new GraphMaintenanceService(
+                store,
+                "trunk",
+                Map.of("trunk", 1L, "alice", 2L),
+                0.2d
+        );
+
+        maintenance.runOnce(Set.of("master"));
+        MergeDecision maintained = store.get("master").orElseThrow();
+
+        assertEquals(originalRender, renderDocument(maintained.acceptedOps()));
+    }
+
+    private String renderDocument(List<Message> operations) {
+        return operations.stream().map(Message::getPayload).reduce((a, b) -> a + "\n" + b).orElse("");
+    }
     @Test
     void graphMaintenance_skipsUnstableBranches() {
         InMemoryShadowStore store = new InMemoryShadowStore();

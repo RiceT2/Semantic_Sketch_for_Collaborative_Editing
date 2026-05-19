@@ -1,6 +1,8 @@
 package com.semantic.sketch.maintenance;
 
 import com.semantic.sketch.ablation.MergeDecision;
+import com.semantic.sketch.crdt.CrdtOperationEnvelope;
+import com.semantic.sketch.crdt.CrdtOperationType;
 import com.semantic.sketch.crdt.Message;
 import com.semantic.sketch.model.ShadowMetadata;
 import com.semantic.sketch.model.SemanticTriple;
@@ -151,41 +153,130 @@ public class GraphMaintenanceService {
         }
 
         List<Message> compressed = new ArrayList<>();
-        Message pending = acceptedOps.get(0);
+        MaintainedOperation pending = toMaintainedOperation(acceptedOps.get(0));
         int compressedCount = 0;
         for (int i = 1; i < acceptedOps.size(); i++) {
-            Message next = acceptedOps.get(i);
+            MaintainedOperation next = toMaintainedOperation(acceptedOps.get(i));
             if (canCompress(pending, next)) {
                 pending = merge(pending, next);
                 compressedCount++;
             } else {
-                compressed.add(pending);
+                compressed.add(pending.message());
                 pending = next;
             }
         }
-        compressed.add(pending);
+        compressed.add(pending.message());
         return new CompressionResult(compressed, compressedCount);
     }
 
-    private boolean canCompress(Message left, Message right) {
-        return left.getActorId().equals(right.getActorId())
-                && normalizedSemanticDrift(left.getSemanticFingerprint(), right.getSemanticFingerprint()) < driftEpsilon;
+    private boolean canCompress(MaintainedOperation left, MaintainedOperation right) {
+        return left.message().getActorId().equals(right.message().getActorId())
+                && isCausallyStable(left.message())
+                && isCausallyStable(right.message())
+                && targetCompatible(left.envelope(), right.envelope())
+                && operationTypeCompatible(left.envelope().getOperationType(), right.envelope().getOperationType())
+                && !hasPendingArbitration(left.envelope())
+                && !hasPendingArbitration(right.envelope())
+                && !hasLiveUndoRedoReference(left.envelope())
+                && !hasLiveUndoRedoReference(right.envelope())
+                && normalizedSemanticDrift(left.message().getSemanticFingerprint(), right.message().getSemanticFingerprint()) < driftEpsilon;
     }
 
     private double normalizedSemanticDrift(long left, long right) {
         return Long.bitCount(left ^ right) / 64.0d;
     }
 
-    private Message merge(Message left, Message right) {
-        Map<String, Long> mergedClock = new LinkedHashMap<>(left.getVectorClock());
-        right.getVectorClock().forEach((actor, clockValue) -> mergedClock.merge(actor, clockValue, Math::max));
-        return new Message(
-                left.getOpId() + "+" + right.getOpId(),
-                left.getActorId(),
-                left.getPayload() + "\n" + right.getPayload(),
+    private MaintainedOperation merge(MaintainedOperation left, MaintainedOperation right) {
+        Map<String, Long> mergedClock = new LinkedHashMap<>(left.message().getVectorClock());
+        right.message().getVectorClock().forEach((actor, clockValue) -> mergedClock.merge(actor, clockValue, Math::max));
+
+        CrdtOperationType mergedType = resolveMergedType(left.envelope().getOperationType(), right.envelope().getOperationType());
+        String archiveRef = "archive://" + left.message().getOpId() + "," + right.message().getOpId();
+        List<SemanticTriple> mergedTriples = new ArrayList<>();
+        mergedTriples.addAll(left.envelope().getSemanticTriples());
+        mergedTriples.addAll(right.envelope().getSemanticTriples());
+        mergedTriples.add(new SemanticTriple("summary", "compacted", semanticSummary(left, right)));
+        mergedTriples.add(new SemanticTriple("archive", "original_ops", archiveRef));
+
+        CrdtOperationEnvelope mergedEnvelope = new CrdtOperationEnvelope(
+                left.message().getOpId() + "+" + right.message().getOpId(),
+                left.message().getActorId(),
+                left.envelope().getBranchId(),
+                mergedType,
                 mergedClock,
-                left.getSemanticFingerprint()
+                firstNonBlank(left.envelope().getTargetPath(), right.envelope().getTargetPath()),
+                left.envelope().getFromIndex(),
+                right.envelope().getToIndex(),
+                mergedInsertedText(left, right, mergedType),
+                mergedDeletedText(left, right, mergedType),
+                "COMPACTED:" + semanticSummary(left, right),
+                null,
+                left.message().getSemanticFingerprint(),
+                mergedTriples,
+                clock.instant()
         );
+        return new MaintainedOperation(mergedEnvelope.toMessage(), mergedEnvelope);
+    }
+
+    private MaintainedOperation toMaintainedOperation(Message message) {
+        CrdtOperationType type = inferType(message);
+        CrdtOperationEnvelope envelope = message.toEnvelope(null, type);
+        return new MaintainedOperation(message, envelope);
+    }
+
+    private CrdtOperationType inferType(Message message) {
+        try {
+            return CrdtOperationType.fromString(message.getPayload());
+        } catch (IllegalArgumentException ignored) {
+            return CrdtOperationType.INSERT;
+        }
+    }
+
+    private boolean targetCompatible(CrdtOperationEnvelope left, CrdtOperationEnvelope right) {
+        return Objects.equals(left.getTargetPath(), right.getTargetPath()) || left.getTargetPath() == null || right.getTargetPath() == null;
+    }
+
+    private boolean operationTypeCompatible(CrdtOperationType left, CrdtOperationType right) {
+        if (left == right) {
+            return true;
+        }
+        return (left == CrdtOperationType.DELETE && right == CrdtOperationType.INSERT)
+                || (left == CrdtOperationType.INSERT && right == CrdtOperationType.DELETE);
+    }
+
+    private CrdtOperationType resolveMergedType(CrdtOperationType left, CrdtOperationType right) {
+        if ((left == CrdtOperationType.DELETE && right == CrdtOperationType.INSERT)
+                || (left == CrdtOperationType.INSERT && right == CrdtOperationType.DELETE)) {
+            return CrdtOperationType.REPLACE;
+        }
+        if (left == CrdtOperationType.SNAPSHOT || right == CrdtOperationType.SNAPSHOT) {
+            return CrdtOperationType.SNAPSHOT;
+        }
+        return CrdtOperationType.COMPACTED;
+    }
+
+    private boolean hasPendingArbitration(CrdtOperationEnvelope envelope) { return false; }
+    private boolean hasLiveUndoRedoReference(CrdtOperationEnvelope envelope) {
+        return envelope.getOperationType() == CrdtOperationType.UNDO || envelope.getOperationType() == CrdtOperationType.REDO;
+    }
+    private String semanticSummary(MaintainedOperation left, MaintainedOperation right) {
+        return left.message().getOpId() + "->" + right.message().getOpId();
+    }
+    private String mergedInsertedText(MaintainedOperation left, MaintainedOperation right, CrdtOperationType mergedType) {
+        if (mergedType == CrdtOperationType.REPLACE) {
+            return right.message().getPayload();
+        }
+        return left.message().getPayload() + "\n" + right.message().getPayload();
+    }
+    private String mergedDeletedText(MaintainedOperation left, MaintainedOperation right, CrdtOperationType mergedType) {
+        if (mergedType == CrdtOperationType.REPLACE) {
+            return left.message().getPayload();
+        }
+        return null;
+    }
+    private String firstNonBlank(String left, String right) {
+        if (left != null && !left.isBlank()) return left;
+        return right;
     }
 
     private ShadowMetadata maintenanceMetadata(String branchId, MergeDecision decision, String phase) {
@@ -208,5 +299,8 @@ public class GraphMaintenanceService {
     }
 
     private record CompressionResult(List<Message> operations, int compressedCount) {
+    }
+
+    private record MaintainedOperation(Message message, CrdtOperationEnvelope envelope) {
     }
 }
