@@ -130,9 +130,12 @@ public class CollaborationSessionHub {
     public synchronized Map<String, ?> snapshot(String branchId) {
         BranchState state = branch(branchId);
         String normalizedBranchId = branchId == null || branchId.isBlank() ? "master" : branchId;
+        String rawCrdtDocument = crdtAdapter.renderDocument(normalizedBranchId);
         return Map.of(
                 "branchId", normalizedBranchId,
                 "document", crdtAdapter.renderDocument(normalizedBranchId),
+                "rawCrdtDocument", rawCrdtDocument,
+                "semanticMergedDocument", buildSemanticMergedDocument(state, normalizedBranchId),
                 "crdt", crdtAdapter.snapshot(normalizedBranchId),
                 "stateVector", crdtAdapter.stateVector(normalizedBranchId),
                 "operations", state.operations.stream().map(message -> operationView(normalizedBranchId, message)).toList(),
@@ -188,8 +191,48 @@ public class CollaborationSessionHub {
         view.put("incoming", result.incoming() == null ? null : operationView(result.branchId(), result.incoming()));
         view.put("acceptedOps", result.acceptedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
         view.put("rejectedOps", result.rejectedOps().stream().map(message -> operationView(result.branchId(), message)).toList());
+        view.put("arbitrationExplanation", arbitrationExplanation(result));
         view.put("snapshot", snapshot(result.branchId()));
         return view;
+    }
+
+    private Map<String, ?> arbitrationExplanation(HubResult result) {
+        List<Map<String, ?>> accepted = result.acceptedOps().stream()
+                .map(message -> operationView(result.branchId(), message))
+                .toList();
+        List<Map<String, ?>> suppressed = result.rejectedOps().stream()
+                .map(message -> operationView(result.branchId(), message))
+                .toList();
+        String decisionSource = "applied".equals(result.type()) ? "system-auto" : "human-required";
+        String reason = result.requestId() == null
+                ? "DeepSeek/本地规则自动决策：残留度满足阈值，采用 accepted 并抑制 suppressed。"
+                : "DeepSeek/本地规则建议 + 人工介入：等待人工确认 accepted/suppressed。";
+        return Map.of(
+                "accepted", accepted,
+                "suppressed", suppressed,
+                "compensated", List.of(),
+                "decisionSource", decisionSource,
+                "reason", reason
+        );
+    }
+
+    private String buildSemanticMergedDocument(BranchState state, String branchId) {
+        String projected = state.operations.stream()
+                .map(message -> {
+                    CrdtOperationEnvelope envelope = state.operationEnvelopes.get(message.getOpId());
+                    if (envelope == null) {
+                        return message.getPayload();
+                    }
+                    return envelope.getIntentText() == null || envelope.getIntentText().isBlank()
+                            ? message.getPayload()
+                            : envelope.getIntentText();
+                })
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(text -> !text.isEmpty())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("");
+        return projected.isBlank() ? crdtAdapter.renderDocument(branchId) : projected;
     }
 
     private Map<String, ?> operationView(String branchId, Message message) {

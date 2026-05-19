@@ -29,6 +29,7 @@
     .event h3 { margin: 0 0 6px; font-size: 15px; }
     .event p { margin: 4px 0; font-size: 13px; color: #44536d; }
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; }
+    .full { grid-column: 1 / -1; }
     .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 12px; background: #fbfdff; min-height: 92px; }
     .card h2 { margin: 0 0 8px; font-size: 15px; color: #243b8f; }
     code { background: #edf2ff; padding: 2px 5px; border-radius: 5px; }
@@ -88,6 +89,9 @@
       <div class="card"><h2>当前主文档操作</h2><div id="ops"></div></div>
       <div class="card"><h2>待人工介入</h2><div id="pending"></div></div>
       <div class="card"><h2>连接状态</h2><p id="status">连接中...</p><p>打开多个浏览器窗口可观察跨用户实时转发。</p></div>
+      <div class="card full"><h2>Raw CRDT 合并结果</h2><pre id="rawDoc">-</pre></div>
+      <div class="card full"><h2>Semantic 最终合并结果</h2><pre id="semanticDoc">-</pre></div>
+      <div class="card full"><h2>仲裁解释（accepted / suppressed / compensated）</h2><div id="arbitration">暂无仲裁信息</div></div>
     </div>
     <div class="timeline" id="timeline"></div>
   </section>
@@ -137,6 +141,7 @@ function renderEvent(type, data) {
   div.className = 'event ' + type;
   div.innerHTML = `<h3>${label(type)}</h3><p>${data.message || ''}</p>${operationSummary(data)}${metrics(data)}${opsLine(data)}`;
   timeline.prepend(div);
+  updateArbitration(data.arbitrationExplanation);
   if (data.snapshot) updateSnapshot(data.snapshot);
 }
 function metrics(data) {
@@ -166,6 +171,20 @@ function updateSnapshot(snapshot) {
   const requests = snapshot.pendingRequests || [];
   document.getElementById('pending').innerHTML = requests.map(req => `<div class="request"><b>${req.requestId}</b><p>R=${Number(req.residue).toFixed(3)}</p><button onclick="humanDecision('${req.requestId}','accept')">接受最优方案</button><button class="danger" onclick="humanDecision('${req.requestId}','rollback')">回溯</button></div>`).join('') || '<p>暂无请求</p>';
   document.getElementById('humanRequests').innerHTML = document.getElementById('pending').innerHTML;
+  document.getElementById('rawDoc').textContent = snapshot.rawCrdtDocument || snapshot.document || '-';
+  document.getElementById('semanticDoc').textContent = snapshot.semanticMergedDocument || '-';
+}
+function updateArbitration(explanation) {
+  if (!explanation) return;
+  const accepted = (explanation.accepted || []).map(formatOperation).join('<br>') || '-';
+  const suppressed = (explanation.suppressed || []).map(formatOperation).join('<br>') || '-';
+  const compensated = (explanation.compensated || []).map(formatOperation).join('<br>') || '-';
+  document.getElementById('arbitration').innerHTML =
+    `<p><b>来源</b>：${explanation.decisionSource || '-'}</p>` +
+    `<p><b>原因</b>：${explanation.reason || '-'}</p>` +
+    `<p><b>accepted</b><br>${accepted}</p>` +
+    `<p><b>suppressed</b><br>${suppressed}</p>` +
+    `<p><b>compensated</b><br>${compensated}</p>`;
 }
 function label(type) {
   return ({connected:'实时通道已连接', applied:'操作已应用', human_intervention_required:'人工介入请求', conflict_detected:'冲突提示', human_decision:'人工决策完成', snapshot:'快照已刷新', api_response:'接口响应', system:'系统消息'})[type] || type;
