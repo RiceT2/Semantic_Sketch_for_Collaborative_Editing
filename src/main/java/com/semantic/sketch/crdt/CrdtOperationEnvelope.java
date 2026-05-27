@@ -27,6 +27,8 @@ public final class CrdtOperationEnvelope {
     private final String yjsUpdateBase64;
     private final long semanticFingerprint;
     private final List<SemanticTriple> semanticTriples;
+    private final InsertAfter insertAfter;
+    private final DeleteById deleteById;
     private final Instant createdAt;
 
     public CrdtOperationEnvelope(String opId,
@@ -44,6 +46,27 @@ public final class CrdtOperationEnvelope {
                                  long semanticFingerprint,
                                  List<SemanticTriple> semanticTriples,
                                  Instant createdAt) {
+        this(opId, actorId, branchId, operationType, vectorClock, targetPath, fromIndex, toIndex, insertedText,
+                deletedTextPreview, intentText, yjsUpdateBase64, semanticFingerprint, semanticTriples, null, null, createdAt);
+    }
+
+    public CrdtOperationEnvelope(String opId,
+                                 String actorId,
+                                 String branchId,
+                                 CrdtOperationType operationType,
+                                 Map<String, Long> vectorClock,
+                                 String targetPath,
+                                 Integer fromIndex,
+                                 Integer toIndex,
+                                 String insertedText,
+                                 String deletedTextPreview,
+                                 String intentText,
+                                 String yjsUpdateBase64,
+                                 long semanticFingerprint,
+                                 List<SemanticTriple> semanticTriples,
+                                 InsertAfter insertAfter,
+                                 DeleteById deleteById,
+                                 Instant createdAt) {
         this.opId = Objects.requireNonNull(opId, "opId");
         this.actorId = Objects.requireNonNull(actorId, "actorId");
         this.branchId = branchId;
@@ -58,6 +81,8 @@ public final class CrdtOperationEnvelope {
         this.yjsUpdateBase64 = yjsUpdateBase64;
         this.semanticFingerprint = semanticFingerprint;
         this.semanticTriples = List.copyOf(Objects.requireNonNullElse(semanticTriples, List.of()));
+        this.insertAfter = insertAfter;
+        this.deleteById = deleteById;
         this.createdAt = Objects.requireNonNullElseGet(createdAt, Instant::now);
     }
 
@@ -80,6 +105,8 @@ public final class CrdtOperationEnvelope {
                 null,
                 message.getSemanticFingerprint(),
                 List.of(),
+                null,
+                null,
                 Instant.now()
         );
     }
@@ -158,6 +185,14 @@ public final class CrdtOperationEnvelope {
 
     public List<SemanticTriple> getSemanticTriples() {
         return semanticTriples;
+    }
+
+    public InsertAfter getInsertAfter() {
+        return insertAfter;
+    }
+
+    public DeleteById getDeleteById() {
+        return deleteById;
     }
 
     public Instant getCreatedAt() {
