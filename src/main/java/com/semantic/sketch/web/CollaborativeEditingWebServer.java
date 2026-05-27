@@ -18,6 +18,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -102,19 +103,35 @@ public class CollaborativeEditingWebServer {
     }
 
     private void handleOperation(HttpExchange exchange) throws IOException {
-        if (!"POST".equals(exchange.getRequestMethod())) {
-            send(exchange, 405, "application/json", JsonSupport.stringify(Map.of("error", "Method not allowed")));
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
             return;
         }
-        Map<String, Object> request = JsonSupport.parseObjectValues(readBody(exchange));
-        CrdtOperationEnvelope envelope = operationEnvelope(request);
+
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, Object> payload = JsonSupport.parseObjectValues(body);
+
+        CrdtOperationEnvelope envelope = operationEnvelope(payload);
         CollaborationSessionHub.HubResult result = hub.submit(envelope);
         Map<String, ?> view = hub.resultView(result);
         broadcaster.broadcast(result.type(), view);
         if ("human_intervention_required".equals(result.type())) {
             broadcaster.broadcast("conflict_detected", view);
         }
-        send(exchange, 200, "application/json", JsonSupport.stringify(view));
+
+        // Build a safe JSON response acknowledgement. Always return a JSON object
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("status", "accepted");
+        resp.put("receivedBranchId", payload == null ? null : payload.get("branchId"));
+        resp.put("receivedActorId", payload == null ? null : payload.get("actorId"));
+        resp.put("receivedPayloadSummary", payload == null ? null : String.valueOf(payload.get("payload")).substring(0, Math.min(256, String.valueOf(payload.get("payload")).length())));
+
+        byte[] respBytes = JsonSupport.stringify(resp).getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        exchange.sendResponseHeaders(200, respBytes.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(respBytes);
+        }
     }
 
     private void handleHumanDecision(HttpExchange exchange) throws IOException {

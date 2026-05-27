@@ -140,7 +140,7 @@ weight(op) = mean(semanticWeight(op), entropyWeight(op), roleWeight(op))
 
 - 接入 DJL/ONNX：将 `extractWeightedKeywords` 替换为 embedding + 稀疏投影。
 - 接入 Redis MVCC：`ShadowStore` 改为 Redis Hash + 版本号 CAS。
-- 接入 Spring AI + 本地模型（如 DeepSeek-7B）：为 `HumanArbiter` 提供快速自动仲裁建议。
+- 接入 Spring AI + 本地模型（如 DeepSeek-1.5B）：为 `HumanArbiter` 提供快速自动仲裁建议。
 - 多模态（文本-图形）约束矩阵：可作为下一阶段扩展（本原型未展开）。
 
 ## 运行
