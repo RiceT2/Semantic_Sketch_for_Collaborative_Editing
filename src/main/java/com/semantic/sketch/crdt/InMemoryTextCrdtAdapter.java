@@ -23,15 +23,53 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
         String targetPath = normalizeTargetPath(envelope.getTargetPath());
         DocumentState state = branch.documents.computeIfAbsent(targetPath, ignored -> new DocumentState());
 
+        if (!isCausallyReady(branch.stateVector, envelope.getVectorClock(), envelope.getActorId())) {
+            branch.pendingOperations.add(PendingOperation.of(envelope, targetPath));
+            return;
+        }
+
+        applyReadyOperation(branch, state, targetPath, envelope);
+        drainPending(branch);
+    }
+
+    private void applyReadyOperation(BranchDocument branch, DocumentState state, String targetPath, CrdtOperationEnvelope envelope) {
         switch (envelope.getOperationType()) {
             case INSERT -> applyInsert(state, envelope);
             case DELETE -> applyDelete(state, envelope);
             case REPLACE -> applyReplace(state, envelope);
             default -> throw new IllegalArgumentException("Unsupported in-memory text operation: " + envelope.getOperationType());
         }
-
         mergeStateVector(branch.stateVector, envelope.getVectorClock());
         branch.appliedOperations.add(OperationRecord.from(envelope, targetPath));
+    }
+
+    private void drainPending(BranchDocument branch) {
+        boolean progressed;
+        do {
+            progressed = false;
+            for (int i = 0; i < branch.pendingOperations.size(); i++) {
+                PendingOperation pending = branch.pendingOperations.get(i);
+                if (!isCausallyReady(branch.stateVector, pending.envelope().getVectorClock(), pending.envelope().getActorId())) continue;
+                DocumentState state = branch.documents.computeIfAbsent(pending.targetPath(), ignored -> new DocumentState());
+                applyReadyOperation(branch, state, pending.targetPath(), pending.envelope());
+                branch.pendingOperations.remove(i);
+                progressed = true;
+                break;
+            }
+        } while (progressed);
+    }
+
+    private boolean isCausallyReady(Map<String, Long> current, Map<String, Long> incoming, String actorId) {
+        for (Map.Entry<String, Long> entry : incoming.entrySet()) {
+            long seen = current.getOrDefault(entry.getKey(), 0L);
+            long required = entry.getValue();
+            if (entry.getKey().equals(actorId)) {
+                if (required > seen + 1) return false;
+            } else if (required > seen) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void applyInsert(DocumentState state, CrdtOperationEnvelope envelope) {
@@ -45,13 +83,13 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
     private void applyDelete(DocumentState state, CrdtOperationEnvelope envelope) {
         DeleteById op = envelope.getDeleteById();
         if (op != null) {
-            state.tombstones.add(op.atomId());
+            state.addTombstone(op.atomId(), envelope.getVectorClock());
             return;
         }
         int from = clampIndex(envelope.getFromIndex(), state.visible().size());
         int to = clampIndex(resolveToIndex(envelope, from), state.visible().size());
         for (int i = from; i < to; i++) {
-            state.tombstones.add(state.visible().get(i).atomId);
+            state.addTombstone(state.visible().get(i).atomId, envelope.getVectorClock());
         }
     }
 
@@ -102,6 +140,15 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
         if (watermark == null || watermark.isEmpty()) return;
         BranchDocument branch = branch(branchId);
         branch.appliedOperations.removeIf(record -> coveredBy(record.vectorClock(), watermark));
+        if (!isObservedByAllKnownReplicas(branch.stateVector, watermark)) return;
+        branch.documents.values().forEach(state -> state.compactStableTombstones(watermark));
+    }
+
+    private boolean isObservedByAllKnownReplicas(Map<String, Long> stateVector, Map<String, Long> watermark) {
+        for (Map.Entry<String, Long> entry : stateVector.entrySet()) {
+            if (watermark.getOrDefault(entry.getKey(), 0L) < entry.getValue()) return false;
+        }
+        return true;
     }
 
     private int resolveToIndex(CrdtOperationEnvelope envelope, int fromIndex) {
@@ -129,11 +176,13 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
         private final Map<String, DocumentState> documents = new LinkedHashMap<>();
         private final Map<String, Long> stateVector = new HashMap<>();
         private final List<OperationRecord> appliedOperations = new ArrayList<>();
+        private final List<PendingOperation> pendingOperations = new ArrayList<>();
     }
 
     private static final class DocumentState {
         private final List<AtomNode> atoms = new ArrayList<>();
         private final Set<TextAtomId> tombstones = ConcurrentHashMap.newKeySet();
+        private final Map<TextAtomId, Map<String, Long>> tombstoneVectorClock = new ConcurrentHashMap<>();
         private final Map<String, Long> nextSeq = new HashMap<>();
 
         void insert(InsertAfter op) {
@@ -180,6 +229,20 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
             for (AtomNode atom : atoms) if (!tombstones.contains(atom.atomId)) sb.append(atom.text);
             return sb.toString();
         }
+
+        void addTombstone(TextAtomId atomId, Map<String, Long> vectorClock) {
+            tombstones.add(atomId);
+            tombstoneVectorClock.put(atomId, Map.copyOf(vectorClock));
+        }
+
+        void compactStableTombstones(Map<String, Long> watermark) {
+            tombstoneVectorClock.entrySet().removeIf(entry -> {
+                if (!coveredBy(entry.getValue(), watermark)) return false;
+                tombstones.remove(entry.getKey());
+                atoms.removeIf(atom -> atom.atomId.equals(entry.getKey()));
+                return true;
+            });
+        }
     }
 
     private record AtomNode(TextAtomId atomId, String text, TextAtomId originLeft, TextAtomId originRight, long lamport) {}
@@ -195,6 +258,12 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
             return Map.of("opId", opId, "actorId", actorId, "operationType", operationType.toJsonValue(), "targetPath", targetPath,
                     "fromIndex", fromIndex == null ? "" : fromIndex, "toIndex", toIndex == null ? "" : toIndex,
                     "vectorClock", vectorClock, "createdAt", createdAt.toString());
+        }
+    }
+
+    private record PendingOperation(CrdtOperationEnvelope envelope, String targetPath) {
+        static PendingOperation of(CrdtOperationEnvelope envelope, String targetPath) {
+            return new PendingOperation(envelope, targetPath);
         }
     }
 }
