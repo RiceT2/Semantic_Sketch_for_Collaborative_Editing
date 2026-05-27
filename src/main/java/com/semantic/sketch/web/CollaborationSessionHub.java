@@ -314,6 +314,7 @@ public class CollaborationSessionHub {
                 safePayload,
                 CrdtOperationEnvelope.DEFAULT_ENCODING,
                 CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
+                0L,
                 List.of(),
                 Instant.now()
         );

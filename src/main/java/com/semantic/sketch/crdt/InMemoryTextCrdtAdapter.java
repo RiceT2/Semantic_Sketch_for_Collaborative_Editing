@@ -167,7 +167,7 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
     private String normalizeBranchId(String branchId) { return branchId == null || branchId.isBlank() ? DEFAULT_BRANCH : branchId; }
     private String normalizeTargetPath(String targetPath) { return targetPath == null || targetPath.isBlank() ? DEFAULT_TARGET_PATH : targetPath; }
     private void mergeStateVector(Map<String, Long> current, Map<String, Long> incoming) { incoming.forEach((actor, tick) -> current.merge(actor, tick, Math::max)); }
-    private boolean coveredBy(Map<String, Long> vectorClock, Map<String, Long> watermark) {
+    private static boolean coveredBy(Map<String, Long> vectorClock, Map<String, Long> watermark) {
         for (Map.Entry<String, Long> entry : vectorClock.entrySet()) if (entry.getValue() > watermark.getOrDefault(entry.getKey(), 0L)) return false;
         return true;
     }
