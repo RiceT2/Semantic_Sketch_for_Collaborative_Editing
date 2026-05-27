@@ -13,6 +13,9 @@ import java.util.Objects;
  * Rich CRDT operation envelope carrying transport, semantic and Yjs metadata.
  */
 public final class CrdtOperationEnvelope {
+    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final String DEFAULT_ENCODING = "json-crdt-patch-v1";
+
     private final String opId;
     private final String actorId;
     private final String branchId;
@@ -25,6 +28,9 @@ public final class CrdtOperationEnvelope {
     private final String deletedTextPreview;
     private final String intentText;
     private final String yjsUpdateBase64;
+    private final String crdtPayload;
+    private final String encoding;
+    private final int schemaVersion;
     private final long semanticFingerprint;
     private final List<SemanticTriple> semanticTriples;
     private final InsertAfter insertAfter;
@@ -43,11 +49,15 @@ public final class CrdtOperationEnvelope {
                                  String deletedTextPreview,
                                  String intentText,
                                  String yjsUpdateBase64,
+                                 String crdtPayload,
+                                 String encoding,
+                                 int schemaVersion,
                                  long semanticFingerprint,
                                  List<SemanticTriple> semanticTriples,
                                  Instant createdAt) {
         this(opId, actorId, branchId, operationType, vectorClock, targetPath, fromIndex, toIndex, insertedText,
-                deletedTextPreview, intentText, yjsUpdateBase64, semanticFingerprint, semanticTriples, null, null, createdAt);
+                deletedTextPreview, intentText, yjsUpdateBase64, crdtPayload, encoding, schemaVersion,
+                semanticFingerprint, semanticTriples, null, null, createdAt);
     }
 
     public CrdtOperationEnvelope(String opId,
@@ -62,6 +72,9 @@ public final class CrdtOperationEnvelope {
                                  String deletedTextPreview,
                                  String intentText,
                                  String yjsUpdateBase64,
+                                 String crdtPayload,
+                                 String encoding,
+                                 int schemaVersion,
                                  long semanticFingerprint,
                                  List<SemanticTriple> semanticTriples,
                                  InsertAfter insertAfter,
@@ -79,6 +92,9 @@ public final class CrdtOperationEnvelope {
         this.deletedTextPreview = deletedTextPreview;
         this.intentText = intentText;
         this.yjsUpdateBase64 = yjsUpdateBase64;
+        this.crdtPayload = crdtPayload;
+        this.encoding = Objects.requireNonNullElse(encoding, DEFAULT_ENCODING);
+        this.schemaVersion = schemaVersion;
         this.semanticFingerprint = semanticFingerprint;
         this.semanticTriples = List.copyOf(Objects.requireNonNullElse(semanticTriples, List.of()));
         this.insertAfter = insertAfter;
@@ -90,6 +106,12 @@ public final class CrdtOperationEnvelope {
                                                     String branchId,
                                                     CrdtOperationType operationType) {
         Objects.requireNonNull(message, "message");
+        if (message.getSchemaVersion() != CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("Unsupported schemaVersion: " + message.getSchemaVersion());
+        }
+        if (message.getCrdtPayload() == null || message.getCrdtPayload().isBlank()) {
+            throw new IllegalArgumentException("crdtPayload is required");
+        }
         return new CrdtOperationEnvelope(
                 message.getOpId(),
                 message.getActorId(),
@@ -99,12 +121,14 @@ public final class CrdtOperationEnvelope {
                 null,
                 null,
                 null,
-                operationType == CrdtOperationType.INSERT ? message.getPayload() : null,
-                operationType == CrdtOperationType.DELETE ? message.getPayload() : null,
-                message.getPayload(),
+                null,
+                null,
+                message.getCrdtPayload(),
+                message.getEncoding(),
+                message.getSchemaVersion(),
                 null,
                 message.getSemanticFingerprint(),
-                List.of(),
+                message.getSemanticTriples(),
                 null,
                 null,
                 Instant.now()
@@ -113,22 +137,6 @@ public final class CrdtOperationEnvelope {
 
     public Message toMessage() {
         return Message.fromEnvelope(this);
-    }
-
-    String toLegacyPayload() {
-        if (insertedText != null) {
-            return insertedText;
-        }
-        if (intentText != null) {
-            return intentText;
-        }
-        if (yjsUpdateBase64 != null) {
-            return yjsUpdateBase64;
-        }
-        if (deletedTextPreview != null) {
-            return deletedTextPreview;
-        }
-        return operationType.toJsonValue();
     }
 
     public String getOpId() {
@@ -177,6 +185,18 @@ public final class CrdtOperationEnvelope {
 
     public String getYjsUpdateBase64() {
         return yjsUpdateBase64;
+    }
+
+    public String getCrdtPayload() {
+        return crdtPayload;
+    }
+
+    public String getEncoding() {
+        return encoding;
+    }
+
+    public int getSchemaVersion() {
+        return schemaVersion;
     }
 
     public long getSemanticFingerprint() {
