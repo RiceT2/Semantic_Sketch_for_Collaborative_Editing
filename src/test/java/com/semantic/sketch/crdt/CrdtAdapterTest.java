@@ -62,6 +62,45 @@ class CrdtAdapterTest {
     }
 
     @Test
+    void inMemoryTextAdapter_delaysOperationUntilOriginBecomesVisible() {
+        InMemoryTextCrdtAdapter adapter = new InMemoryTextCrdtAdapter();
+
+        CrdtOperationEnvelope dependent = insertById("op-a2", "alice", 2,
+                new TextAtomId("alice", 1), null, "B", 2);
+        CrdtOperationEnvelope origin = insertById("op-a1", "alice", 1,
+                null, null, "A", 1);
+
+        adapter.apply(dependent);
+        assertEquals("", adapter.renderDocument("main"));
+
+        adapter.apply(origin);
+        assertEquals("AB", adapter.renderDocument("main"));
+    }
+
+    @Test
+    void inMemoryTextAdapter_concurrentCrossActorInsertDeleteAndDelayedDependencyConverges() {
+        List<CrdtOperationEnvelope> ops = List.of(
+                insertById("op-a1", "alice", 1, null, null, "A", 1),
+                insertById("op-b1", "bob", 1, new TextAtomId("alice", 1), null, "B", 2),
+                deleteById("op-del-a", "alice", new TextAtomId("bob", 1), 3),
+                insertById("op-b2", "bob", 2, new TextAtomId("bob", 1), null, "C", 3),
+                deleteById("op-del-b", "bob", new TextAtomId("alice", 1), 4)
+        );
+
+        InMemoryTextCrdtAdapter baselineAdapter = new InMemoryTextCrdtAdapter();
+        ops.forEach(baselineAdapter::apply);
+        String baseline = baselineAdapter.renderDocument("main");
+
+        for (int seed = 0; seed < 30; seed++) {
+            List<CrdtOperationEnvelope> replay = new ArrayList<>(ops);
+            Collections.shuffle(replay, new Random(seed));
+            InMemoryTextCrdtAdapter adapter = new InMemoryTextCrdtAdapter();
+            replay.forEach(adapter::apply);
+            assertEquals(baseline, adapter.renderDocument("main"));
+        }
+    }
+
+    @Test
     void yjsAdapter_storesBase64UpdatesUntilExternalRendererIsAttached() {
         YjsUpdateCrdtAdapter adapter = new YjsUpdateCrdtAdapter();
         adapter.apply(new CrdtOperationEnvelope(
