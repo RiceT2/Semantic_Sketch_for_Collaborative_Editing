@@ -211,6 +211,9 @@ public class GraphMaintenanceService {
                 mergedDeletedText(left, right, mergedType),
                 "COMPACTED:" + semanticSummary(left, right),
                 null,
+                "COMPACTED:" + semanticSummary(left, right),
+                CrdtOperationEnvelope.DEFAULT_ENCODING,
+                CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                 left.message().getSemanticFingerprint(),
                 mergedTriples,
                 clock.instant()

@@ -1,0 +1,23 @@
+name: benchmark-nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  full-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run full benchmark
+        run: mvn -q -Dtest=CrdtBenchmarkRunner -Dbenchmark.traceName=nightly -Dbenchmark.docSize=4096 -Dbenchmark.actors=16 -Dbenchmark.concurrency=8 -Dbenchmark.operations=5000 -Dbenchmark.mode=mixed test
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-nightly-results
+          path: benchmarks/results

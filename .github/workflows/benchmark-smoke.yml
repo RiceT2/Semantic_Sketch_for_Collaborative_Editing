@@ -1,0 +1,23 @@
+name: benchmark-smoke
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run smoke benchmark
+        run: mvn -q -Dtest=CrdtBenchmarkRunner -Dbenchmark.traceName=ci-smoke -Dbenchmark.docSize=32 -Dbenchmark.actors=2 -Dbenchmark.concurrency=1 -Dbenchmark.operations=80 test
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-smoke-results
+          path: benchmarks/results
