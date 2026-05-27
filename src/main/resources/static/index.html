@@ -262,21 +262,32 @@ function updateArbitration(explanation) {
 function updateSnapshot(snapshot) {
     if (!snapshot) return;
 
-    // 渲染 Raw CRDT 的底层数据表示
+    const rawDocText =
+        snapshot.rawCrdtDocument
+        || snapshot.document
+        || (snapshot.crdt && typeof snapshot.crdt.document === 'string' ? snapshot.crdt.document : null)
+        || '-';
+
+    // 渲染 Raw CRDT 的可读合并文本（优先展示后端已投影出的文档）
     const rawContainer = document.getElementById('rawDoc');
     if (rawContainer) {
-        rawContainer.textContent = snapshot.rawContent || JSON.stringify(snapshot, null, 2);
+        rawContainer.textContent = typeof rawDocText === 'string' ? rawDocText : JSON.stringify(rawDocText, null, 2);
     }
+
+    const semanticDocText =
+        snapshot.semanticMergedDocument
+        || snapshot.document
+        || '-';
 
     // 渲染经过冲突消融（Ablation）后的最终语义文本
     const semanticContainer = document.getElementById('semanticDoc');
     if (semanticContainer) {
-        semanticContainer.textContent = snapshot.semanticContent || snapshot.currentText || '-';
+        semanticContainer.textContent = semanticDocText;
     }
 
     // 更新左侧主编辑框的值（如果用户当前没在输入，防止光标被强行打断）
-    if (snapshot.semanticContent && document.activeElement !== editor) {
-        editor.value = snapshot.semanticContent;
+    if (semanticDocText && semanticDocText !== '-' && document.activeElement !== editor) {
+        editor.value = semanticDocText;
     }
 
     // 更新当前待处理的人工介入任务卡片
