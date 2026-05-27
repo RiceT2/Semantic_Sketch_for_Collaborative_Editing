@@ -84,10 +84,59 @@ class CrdtAdapterTest {
 
         Map<String, ?> snapshot = adapter.snapshot("main");
 
-        assertEquals("", adapter.renderDocument("main"));
-        assertEquals(Map.of("alice", 7L), adapter.stateVector("main"));
-        assertTrue(String.valueOf(snapshot.get("renderingStatus")).contains("Node sidecar"));
+        assertEquals("\u0001\u0002\u0003\u0004", adapter.renderDocument("main"));
+        assertEquals(Map.of("updates", 1L), adapter.stateVector("main"));
+        assertEquals("rendered_by_sidecar", snapshot.get("renderingStatus"));
+        assertTrue(snapshot.containsKey("documentHash"));
+        assertTrue(snapshot.containsKey("sidecarVersion"));
         assertTrue(String.valueOf(snapshot.get("updates")).contains("AQIDBA=="));
+    }
+
+    @Test
+    void yjsAdapter_convergesAcrossShuffledUpdateSetAndMatchesGoldenHash() {
+        List<CrdtOperationEnvelope> updates = List.of(
+                yjsEnvelope("op-1", "alice", 1, "QQ=="),
+                yjsEnvelope("op-2", "bob", 1, "Qg=="),
+                yjsEnvelope("op-3", "alice", 2, "Qw==")
+        );
+
+        YjsUpdateCrdtAdapter reference = new YjsUpdateCrdtAdapter();
+        updates.forEach(reference::apply);
+        Map<String, ?> baselineSnapshot = reference.snapshot("main");
+        String baselineText = reference.renderDocument("main");
+        String goldenHash = String.valueOf(baselineSnapshot.get("documentHash"));
+
+        for (int seed = 0; seed < 20; seed++) {
+            List<CrdtOperationEnvelope> replay = new ArrayList<>(updates);
+            Collections.shuffle(replay, new Random(seed));
+
+            YjsUpdateCrdtAdapter adapter = new YjsUpdateCrdtAdapter();
+            replay.forEach(adapter::apply);
+            Map<String, ?> snapshot = adapter.snapshot("main");
+
+            assertEquals(baselineText, adapter.renderDocument("main"));
+            assertEquals(goldenHash, snapshot.get("documentHash"));
+        }
+    }
+
+    private CrdtOperationEnvelope yjsEnvelope(String opId, String actor, long tick, String update) {
+        return new CrdtOperationEnvelope(
+                opId,
+                actor,
+                "main",
+                CrdtOperationType.REPLACE,
+                Map.of(actor, tick),
+                null,
+                null,
+                null,
+                null,
+                null,
+                "apply yjs update",
+                update,
+                0L,
+                List.of(),
+                Instant.parse("2026-05-11T00:00:00Z")
+        );
     }
 
     private CrdtOperationEnvelope envelope(String opId,

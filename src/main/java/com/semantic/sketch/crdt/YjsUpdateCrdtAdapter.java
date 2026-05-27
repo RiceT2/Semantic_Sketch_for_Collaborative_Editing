@@ -25,6 +25,15 @@ public class YjsUpdateCrdtAdapter implements CrdtAdapter {
     private static final String DEFAULT_BRANCH = "master";
 
     private final Map<String, BranchUpdates> branches = new ConcurrentHashMap<>();
+    private final YjsSidecarClient sidecarClient;
+
+    public YjsUpdateCrdtAdapter() {
+        this(new InProcessYjsSidecarClient());
+    }
+
+    public YjsUpdateCrdtAdapter(YjsSidecarClient sidecarClient) {
+        this.sidecarClient = Objects.requireNonNull(sidecarClient, "sidecarClient");
+    }
 
     @Override
     public synchronized void apply(CrdtOperationEnvelope envelope) {
@@ -35,12 +44,15 @@ public class YjsUpdateCrdtAdapter implements CrdtAdapter {
             throw new IllegalArgumentException("Yjs update envelope must include yjsUpdateBase64");
         }
         branch.updates.add(UpdateRecord.from(envelope));
-        envelope.getVectorClock().forEach((actor, tick) -> branch.stateVector.merge(actor, tick, Math::max));
+        YjsSidecarClient.SidecarMergeResult mergeResult = sidecarClient.applyUpdate(normalizeBranchId(envelope.getBranchId()), update);
+        branch.documentHash = mergeResult.documentHash();
+        branch.stateVector.clear();
+        branch.stateVector.putAll(mergeResult.stateVector());
     }
 
     @Override
     public synchronized String renderDocument(String branchId) {
-        return "";
+        return sidecarClient.exportText(normalizeBranchId(branchId));
     }
 
     @Override
@@ -49,7 +61,11 @@ public class YjsUpdateCrdtAdapter implements CrdtAdapter {
         BranchUpdates branch = branch(normalizedBranchId);
         return Map.of(
                 "branchId", normalizedBranchId,
-                "renderingStatus", "Yjs updates stored; rendering pending Node sidecar, Rust yrs sidecar, or browser snapshot callback.",
+                "renderingStatus", "rendered_by_sidecar",
+                "document", sidecarClient.exportText(normalizedBranchId),
+                "documentJson", sidecarClient.exportJson(normalizedBranchId),
+                "documentHash", branch.documentHash,
+                "sidecarVersion", sidecarClient.sidecarVersion(),
                 "stateVector", Map.copyOf(branch.stateVector),
                 "updates", branch.updates.stream().map(UpdateRecord::toView).toList()
         );
@@ -89,6 +105,7 @@ public class YjsUpdateCrdtAdapter implements CrdtAdapter {
     private static final class BranchUpdates {
         private final List<UpdateRecord> updates = new ArrayList<>();
         private final Map<String, Long> stateVector = new HashMap<>();
+        private String documentHash = "";
     }
 
     private record UpdateRecord(String opId,
