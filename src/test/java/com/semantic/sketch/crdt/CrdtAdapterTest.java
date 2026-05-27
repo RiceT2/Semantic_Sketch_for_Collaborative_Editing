@@ -3,8 +3,11 @@ package com.semantic.sketch.crdt;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,6 +36,29 @@ class CrdtAdapterTest {
                 adapter.apply(envelope("op-format", CrdtOperationType.FORMAT, 0, 0, "", null, Map.of("alice", 1L))));
 
         assertTrue(error.getMessage().contains("Unsupported in-memory text operation"));
+    }
+
+    @Test
+    void inMemoryTextAdapter_concurrentSetConvergesAcrossRandomReplayOrder() {
+        List<CrdtOperationEnvelope> concurrent = List.of(
+                insertById("op-a1", "alice", 1, null, null, "A", 1),
+                insertById("op-b1", "bob", 1, null, null, "B", 1),
+                insertById("op-a2", "alice", 2, new TextAtomId("alice", 1), null, "a", 2),
+                insertById("op-b2", "bob", 2, new TextAtomId("bob", 1), null, "b", 2),
+                deleteById("op-del", "alice", new TextAtomId("bob", 1), 3)
+        );
+
+        InMemoryTextCrdtAdapter baselineAdapter = new InMemoryTextCrdtAdapter();
+        concurrent.forEach(baselineAdapter::apply);
+        String baseline = baselineAdapter.renderDocument("main");
+
+        for (int seed = 0; seed < 20; seed++) {
+            List<CrdtOperationEnvelope> replay = new ArrayList<>(concurrent);
+            Collections.shuffle(replay, new Random(seed));
+            InMemoryTextCrdtAdapter adapter = new InMemoryTextCrdtAdapter();
+            replay.forEach(adapter::apply);
+            assertEquals(baseline, adapter.renderDocument("main"));
+        }
     }
 
     @Test
@@ -88,5 +114,18 @@ class CrdtAdapterTest {
                 List.of(),
                 Instant.parse("2026-05-11T00:00:00Z")
         );
+    }
+
+    private CrdtOperationEnvelope insertById(String opId, String actor, long seq, TextAtomId left, TextAtomId right, String text, long lamport) {
+        return new CrdtOperationEnvelope(opId, actor, "main", CrdtOperationType.INSERT, Map.of(actor, lamport), "/document", null,
+                null, null, null, "insert", null, 0L, List.of(),
+                new InsertAfter(new TextAtomId(actor, seq), left, right, text, lamport), null,
+                Instant.parse("2026-05-11T00:00:00Z"));
+    }
+
+    private CrdtOperationEnvelope deleteById(String opId, String actor, TextAtomId atomId, long lamport) {
+        return new CrdtOperationEnvelope(opId, actor, "main", CrdtOperationType.DELETE, Map.of(actor, lamport), "/document", null,
+                null, null, null, "delete", null, 0L, List.of(), null, new DeleteById(atomId),
+                Instant.parse("2026-05-11T00:00:00Z"));
     }
 }
