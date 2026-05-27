@@ -184,6 +184,9 @@ public class CollaborativeEditingWebServer {
                 deletedTextPreview,
                 intentText,
                 stringValue(request.get("yjsUpdateBase64")),
+                payload,
+                CrdtOperationEnvelope.DEFAULT_ENCODING,
+                CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                 0L,
                 semanticTriples(request.get("semanticTriples")),
                 Instant.now()

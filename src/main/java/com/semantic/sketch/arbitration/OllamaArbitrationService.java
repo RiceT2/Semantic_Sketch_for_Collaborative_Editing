@@ -114,6 +114,9 @@ public class OllamaArbitrationService {
                     deleted,
                     intent,
                     null,
+                    intent,
+                    CrdtOperationEnvelope.DEFAULT_ENCODING,
+                    CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                     0L,
                     List.of(),
                     Instant.now()));

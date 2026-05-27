@@ -304,10 +304,16 @@ public class CollaborationSessionHub {
                         operationType == CrdtOperationType.DELETE ? safePayload : null,
                         safePayload,
                         null,
+                        safePayload,
+                        CrdtOperationEnvelope.DEFAULT_ENCODING,
+                        CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                         0L,
                         List.of(),
                         Instant.now()
                 )),
+                safePayload,
+                CrdtOperationEnvelope.DEFAULT_ENCODING,
+                CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                 List.of(),
                 Instant.now()
         );
@@ -330,6 +336,9 @@ public class CollaborationSessionHub {
                 envelope.getDeletedTextPreview(),
                 intentText,
                 envelope.getYjsUpdateBase64(),
+                envelope.getCrdtPayload(),
+                envelope.getEncoding(),
+                envelope.getSchemaVersion(),
                 0L,
                 envelope.getSemanticTriples(),
                 envelope.getCreatedAt()
@@ -347,6 +356,9 @@ public class CollaborationSessionHub {
                 normalizedEnvelope.getDeletedTextPreview(),
                 normalizedEnvelope.getIntentText(),
                 normalizedEnvelope.getYjsUpdateBase64(),
+                normalizedEnvelope.getCrdtPayload(),
+                normalizedEnvelope.getEncoding(),
+                normalizedEnvelope.getSchemaVersion(),
                 fingerprintService.fingerprint(normalizedEnvelope),
                 normalizedEnvelope.getSemanticTriples().isEmpty()
                         ? fingerprintService.extractTriples(normalizedEnvelope)
