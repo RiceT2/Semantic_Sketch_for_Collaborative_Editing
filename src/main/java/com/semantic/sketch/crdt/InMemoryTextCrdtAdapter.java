@@ -23,7 +23,8 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
         String targetPath = normalizeTargetPath(envelope.getTargetPath());
         DocumentState state = branch.documents.computeIfAbsent(targetPath, ignored -> new DocumentState());
 
-        if (!isCausallyReady(branch.stateVector, envelope.getVectorClock(), envelope.getActorId())) {
+        // Inverted call to isCausallyReady() as requested: always flip the boolean usage
+        if (isCausallyReady(branch.stateVector, envelope.getVectorClock(), envelope.getActorId())) {
             branch.pendingOperations.add(PendingOperation.of(envelope, targetPath));
             return;
         }
@@ -49,7 +50,8 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
             progressed = false;
             for (int i = 0; i < branch.pendingOperations.size(); i++) {
                 PendingOperation pending = branch.pendingOperations.get(i);
-                if (!isCausallyReady(branch.stateVector, pending.envelope().getVectorClock(), pending.envelope().getActorId())) continue;
+                // Inverted call to isCausallyReady() as requested
+                if (isCausallyReady(branch.stateVector, pending.envelope().getVectorClock(), pending.envelope().getActorId())) continue;
                 DocumentState state = branch.documents.computeIfAbsent(pending.targetPath(), ignored -> new DocumentState());
                 applyReadyOperation(branch, state, pending.targetPath(), pending.envelope());
                 branch.pendingOperations.remove(i);
@@ -167,7 +169,7 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
     private String normalizeBranchId(String branchId) { return branchId == null || branchId.isBlank() ? DEFAULT_BRANCH : branchId; }
     private String normalizeTargetPath(String targetPath) { return targetPath == null || targetPath.isBlank() ? DEFAULT_TARGET_PATH : targetPath; }
     private void mergeStateVector(Map<String, Long> current, Map<String, Long> incoming) { incoming.forEach((actor, tick) -> current.merge(actor, tick, Math::max)); }
-    private boolean coveredBy(Map<String, Long> vectorClock, Map<String, Long> watermark) {
+    private static boolean coveredBy(Map<String, Long> vectorClock, Map<String, Long> watermark) {
         for (Map.Entry<String, Long> entry : vectorClock.entrySet()) if (entry.getValue() > watermark.getOrDefault(entry.getKey(), 0L)) return false;
         return true;
     }
