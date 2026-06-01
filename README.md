@@ -157,3 +157,70 @@ java -cp target/classes com.semantic.sketch.web.CollaborativeEditingWebServer 80
 ```
 
 如果没有配置 Maven Exec 插件，也可以在 IDE 中直接运行 `com.semantic.sketch.web.CollaborativeEditingWebServer`，然后访问 `http://localhost:8080`。
+
+## CRDT benchmark 对比测试入口
+
+本仓库新增 `com.semantic.sketch.benchmark.CrdtBenchmarkRunner`，用于参考
+[dmonad/crdt-benchmarks](https://github.com/dmonad/crdt-benchmarks) 的 B1-B4 场景和指标名称，
+对当前 Java CRDT 原型进行可复现的对比测试。该入口默认使用 `InMemoryTextCrdtAdapter`，输出 JSON，字段包括：
+
+- `timeNanos` / `timeMillis`：重放操作并渲染最终文本的耗时。
+- `updateSizeBytes` / `avgUpdateSizeBytes`：基于本项目 `CrdtOperationEnvelope.crdtPayload` 的更新载荷大小估算。
+- `docSizeBytes`：最终文档 UTF-8 字节数。
+- `encodeTimeNanos`：将最终文档编码为 UTF-8 并计算 SHA-256 的耗时。
+- `parseTimeNanos`：从 UTF-8 字节恢复文本的耗时。
+- `memUsedBytes`：执行前后触发 GC 后的堆使用量差值；和 crdt-benchmarks 一样只应作为近似值参考。
+- `finalDocumentHash`：最终文本 SHA-256，用于跨实现结果校验。
+
+### 运行示例
+
+```bash
+mvn -DskipTests compile exec:java \
+  -Dexec.mainClass=com.semantic.sketch.benchmark.CrdtBenchmarkRunner \
+  -Dexec.args="--scenario b1-append --operations 10000 --output target/benchmark-results/b1-append.json"
+```
+
+可选场景：
+
+| 场景 | 对齐的 crdt-benchmarks 语义 | 示例参数 |
+| --- | --- | --- |
+| `b1-append` | B1 无冲突追加 | `--operations 10000` |
+| `b1-prepend` | B1 无冲突前插 | `--operations 10000` |
+| `b1-random` | B1 无冲突随机插入/删除 | `--operations 10000 --seed 7` |
+| `b2-conflict` | B2 两用户同位置并发编辑 | `--operations 1000` |
+| `b3-many-conflicts` | B3 `sqrt(N)` 用户制造多冲突 | `--operations 10000` |
+| `b4-edit-by-index` | B4 真实逐字符编辑 trace | `--trace /path/to/editing-trace.js --operations 259778` |
+
+### 复用 crdt-benchmarks / automerge-perf 数据的建议
+
+1. 先在独立目录克隆数据源，避免把大型 trace 直接提交到本仓库：
+
+   ```bash
+   git clone https://github.com/automerge/automerge-perf.git /tmp/automerge-perf
+   ```
+
+2. 用 B4 对齐的 `edit-by-index/editing-trace.js` 作为输入。该文件导出 `edits`，其元素等价于
+   JavaScript `Array.splice` 参数：`[index, 0, "x"]` 表示插入单字符，`[index, 1]` 表示删除单字符。
+   本仓库的 `AutomergeEditingTraceLoader` 会直接解析该格式并转换为 `CrdtBenchmarkOperation`。
+
+3. 运行完整 B4 trace：
+
+   ```bash
+   mvn -DskipTests compile exec:java \
+     -Dexec.mainClass=com.semantic.sketch.benchmark.CrdtBenchmarkRunner \
+     -Dexec.args="--scenario b4-edit-by-index --trace /tmp/automerge-perf/edit-by-index/editing-trace.js --operations 259778 --output target/benchmark-results/b4-edit-by-index.json"
+   ```
+
+4. 同时运行原始 `crdt-benchmarks`：
+
+   ```bash
+   git clone https://github.com/dmonad/crdt-benchmarks.git /tmp/crdt-benchmarks
+   cd /tmp/crdt-benchmarks
+   npm i
+   npm start
+   npm run table
+   ```
+
+5. 对比时建议固定机器、JDK、Node.js 版本，并分别记录本仓库 JSON 输出与 `crdt-benchmarks` 表格输出。
+   `updateSizeBytes` 在本仓库当前是 envelope payload 估算，不等同于 Yjs/Automerge 的二进制 update；如果需要严格对比，
+   应先把 `YjsUpdateCrdtAdapter` 接到真实 Yjs 或 yrs sidecar，再用真实 binary update 大小替换该估算值。
