@@ -23,8 +23,7 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
         String targetPath = normalizeTargetPath(envelope.getTargetPath());
         DocumentState state = branch.documents.computeIfAbsent(targetPath, ignored -> new DocumentState());
 
-        // Inverted call to isCausallyReady() as requested: always flip the boolean usage
-        if (isCausallyReady(branch.stateVector, envelope.getVectorClock(), envelope.getActorId())) {
+        if (!isCausallyReady(branch.stateVector, envelope.getVectorClock(), envelope.getActorId())) {
             branch.pendingOperations.add(PendingOperation.of(envelope, targetPath));
             return;
         }
@@ -50,8 +49,7 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
             progressed = false;
             for (int i = 0; i < branch.pendingOperations.size(); i++) {
                 PendingOperation pending = branch.pendingOperations.get(i);
-                // Inverted call to isCausallyReady() as requested
-                if (isCausallyReady(branch.stateVector, pending.envelope().getVectorClock(), pending.envelope().getActorId())) continue;
+                if (!isCausallyReady(branch.stateVector, pending.envelope().getVectorClock(), pending.envelope().getActorId())) continue;
                 DocumentState state = branch.documents.computeIfAbsent(pending.targetPath(), ignored -> new DocumentState());
                 applyReadyOperation(branch, state, pending.targetPath(), pending.envelope());
                 branch.pendingOperations.remove(i);
@@ -62,6 +60,9 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
     }
 
     private boolean isCausallyReady(Map<String, Long> current, Map<String, Long> incoming, String actorId) {
+        if (!incoming.containsKey(actorId)) {
+            return true;
+        }
         for (Map.Entry<String, Long> entry : incoming.entrySet()) {
             long seen = current.getOrDefault(entry.getKey(), 0L);
             long required = entry.getValue();
@@ -96,10 +97,24 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
     }
 
     private void applyReplace(DocumentState state, CrdtOperationEnvelope envelope) {
-        applyDelete(state, envelope);
+        if (isWholeDocumentReplace(envelope)) {
+            List<AtomNode> visible = state.visible();
+            for (AtomNode atom : visible) {
+                state.addTombstone(atom.atomId, envelope.getVectorClock());
+            }
+        } else {
+            applyDelete(state, envelope);
+        }
         if (envelope.getInsertedText() != null && !envelope.getInsertedText().isEmpty()) {
             applyInsert(state, envelope);
         }
+    }
+
+    private boolean isWholeDocumentReplace(CrdtOperationEnvelope envelope) {
+        return envelope.getOperationType() == CrdtOperationType.REPLACE
+                && envelope.getFromIndex() == null
+                && envelope.getToIndex() == null
+                && envelope.getDeletedTextPreview() == null;
     }
 
     private InsertAfter fromLegacyInsert(DocumentState state, CrdtOperationEnvelope envelope) {

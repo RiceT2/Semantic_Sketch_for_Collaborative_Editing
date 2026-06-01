@@ -77,7 +77,7 @@ public final class CrdtOperationEnvelope {
                                  Instant createdAt) {
         this(opId, actorId, branchId, operationType, vectorClock, targetPath, fromIndex, toIndex,
                 insertedText, deletedTextPreview, intentText, yjsUpdateBase64,
-                /* crdtPayload */ null,
+                defaultCrdtPayload(operationType, targetPath, fromIndex, toIndex, insertedText, deletedTextPreview, yjsUpdateBase64),
                 /* encoding */ DEFAULT_ENCODING,
                 /* schemaVersion */ CURRENT_SCHEMA_VERSION,
                 semanticFingerprint,
@@ -105,6 +105,34 @@ public final class CrdtOperationEnvelope {
         this(opId, actorId, branchId, operationType, normalizeVectorClockFromObject(rawVectorClock), targetPath, fromIndex, toIndex,
                 insertedText, deletedTextPreview, intentText, yjsUpdateBase64,
                 semanticFingerprint, semanticTriples, createdAt);
+    }
+
+    private static String defaultCrdtPayload(CrdtOperationType operationType,
+                                             String targetPath,
+                                             Integer fromIndex,
+                                             Integer toIndex,
+                                             String insertedText,
+                                             String deletedTextPreview,
+                                             String yjsUpdateBase64) {
+        if (yjsUpdateBase64 != null && !yjsUpdateBase64.isBlank()) {
+            return yjsUpdateBase64;
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(operationType == null ? "UNKNOWN" : operationType.toJsonValue());
+        if (targetPath != null && !targetPath.isBlank()) {
+            builder.append(' ').append(targetPath);
+        }
+        if (fromIndex != null || toIndex != null) {
+            builder.append('[').append(fromIndex == null ? "" : fromIndex).append(',')
+                    .append(toIndex == null ? "" : toIndex).append(']');
+        }
+        if (insertedText != null) {
+            builder.append(" +").append(insertedText);
+        }
+        if (deletedTextPreview != null) {
+            builder.append(" -").append(deletedTextPreview);
+        }
+        return builder.toString();
     }
 
     private static Map<String, Long> normalizeVectorClock(Map<?, ?> raw) {
