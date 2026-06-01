@@ -88,7 +88,7 @@
       <div class="card"><h2>当前主文档操作</h2><div id="ops"></div></div>
       <div class="card"><h2>待人工介入</h2><div id="pending"></div></div>
       <div class="card"><h2>连接状态</h2><p id="status">连接中...</p><p>打开多个浏览器窗口可观察跨用户实时转发。</p></div>
-      <div class="card full"><h2>Raw CRDT 合并结果</h2><pre id="rawDoc">-</pre></div>
+      <div class="card full"><h2>CRDT 可读合并结果</h2><pre id="rawDoc">-</pre></div>
       <div class="card full"><h2>Semantic 最终合并结果</h2><pre id="semanticDoc">-</pre></div>
       <div class="card full"><h2>仲裁解释（accepted / suppressed / compensated）</h2><div id="arbitration">暂无仲裁信息</div></div>
     </div>
@@ -254,9 +254,30 @@ function updateArbitration(explanation) {
         container.innerHTML = `<span style="color:#8c9ba5">暂无最新冲突仲裁执行指令</span>`;
         return;
     }
+    const html = typeof explanation === 'string'
+        ? escapeHtml(explanation)
+        : formatArbitrationExplanation(explanation);
     container.innerHTML = `<div style="background:#eef2ff;padding:8px 12px;border-radius:8px;border-left:4px solid #315efb;font-size:13px;line-height:1.5">
-    ${explanation}
+    ${html}
   </div>`;
+}
+
+function formatArbitrationExplanation(explanation) {
+    const accepted = (explanation.accepted || []).map(op => `${op.actorId || 'unknown'}:${op.operationType || 'op'} → ${op.payload || op.intentText || ''}`).join('<br>') || '无';
+    const suppressed = (explanation.suppressed || []).map(op => `${op.actorId || 'unknown'}:${op.operationType || 'op'} → ${op.payload || op.intentText || ''}`).join('<br>') || '无';
+    return `<strong>决策来源:</strong> ${escapeHtml(explanation.decisionSource || 'system')}<br>
+            <strong>原因:</strong> ${escapeHtml(explanation.reason || '')}<br>
+            <strong>accepted:</strong><br>${escapeHtml(accepted).replaceAll('&lt;br&gt;', '<br>')}<br>
+            <strong>suppressed:</strong><br>${escapeHtml(suppressed).replaceAll('&lt;br&gt;', '<br>')}`;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
 }
 
 function updateSnapshot(snapshot) {

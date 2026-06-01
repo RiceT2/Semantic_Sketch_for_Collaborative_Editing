@@ -161,6 +161,11 @@ public class CollaborativeEditingWebServer {
                 payloadSummary = s.substring(0, Math.min(256, s.length()));
             }
             resp.put("receivedPayloadSummary", payloadSummary);
+            resp.put("type", view.get("type"));
+            resp.put("message", view.get("message"));
+            resp.put("incoming", view.get("incoming"));
+            resp.put("snapshot", view.get("snapshot"));
+            resp.put("arbitrationExplanation", view.get("arbitrationExplanation"));
 
             byte[] respBytes = JsonSupport.stringify(resp).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
@@ -220,34 +225,84 @@ public class CollaborativeEditingWebServer {
         if (request == null) {
             request = Map.of();
         }
-        String branchId = valueOrDefault(stringValue(request.get("branchId")), "master");
-        String actorId = valueOrDefault(stringValue(request.get("actorId")), "anonymous");
-        String payload = valueOrDefault(stringValue(request.get("payload")), "empty edit");
-        CrdtOperationType operationType = inferCompatibilityOperationType(payload);
-        String intentText = valueOrDefault(stringValue(request.get("intentText")), payload);
-        String insertedText = stringValue(request.get("insertedText"));
-        String deletedTextPreview = stringValue(request.get("deletedTextPreview"));
-        if (request.get("operationType") == null) {
+        Map<String, Object> envelopeRequest = envelopeRequest(request);
+        String branchId = valueOrDefault(stringValue(envelopeRequest.get("branchId")), "master");
+        String actorId = valueOrDefault(stringValue(envelopeRequest.get("actorId")), "anonymous");
+        String payload = valueOrDefault(stringValue(envelopeRequest.get("payload")), "empty edit");
+        CrdtOperationType operationType = operationType(envelopeRequest.get("operationType"), payload);
+        String intentText = valueOrDefault(stringValue(envelopeRequest.get("intentText")), payload);
+        String insertedText = stringValue(envelopeRequest.get("insertedText"));
+        String deletedTextPreview = stringValue(envelopeRequest.get("deletedTextPreview"));
+        if (envelopeRequest.get("operationType") == null) {
             insertedText = operationType == CrdtOperationType.DELETE ? insertedText : payload;
             deletedTextPreview = operationType == CrdtOperationType.DELETE ? payload : deletedTextPreview;
         }
+        String crdtPayload = valueOrDefault(
+                stringValue(envelopeRequest.get("crdtPayload")),
+                valueOrDefault(stringValue(envelopeRequest.get("yjsUpdateBase64")), payload)
+        );
         return new CrdtOperationEnvelope(
-                valueOrDefault(stringValue(request.get("opId")), "op-" + UUID.randomUUID()),
+                valueOrDefault(stringValue(envelopeRequest.get("opId")), "op-" + UUID.randomUUID()),
                 actorId,
                 branchId,
                 operationType,
-                Map.of(),
-                stringValue(request.get("targetPath")),
-                integerValue(request.get("fromIndex")),
-                integerValue(request.get("toIndex")),
+                vectorClock(envelopeRequest.get("vectorClock")),
+                valueOrDefault(stringValue(envelopeRequest.get("targetPath")), "/document"),
+                integerValue(envelopeRequest.get("fromIndex")),
+                integerValue(envelopeRequest.get("toIndex")),
                 insertedText,
                 deletedTextPreview,
                 intentText,
-                stringValue(request.get("yjsUpdateBase64")),
+                stringValue(envelopeRequest.get("yjsUpdateBase64")),
+                crdtPayload,
+                valueOrDefault(stringValue(envelopeRequest.get("encoding")), CrdtOperationEnvelope.DEFAULT_ENCODING),
+                CrdtOperationEnvelope.CURRENT_SCHEMA_VERSION,
                 0L,
-                semanticTriples(request.get("semanticTriples")),
+                semanticTriples(envelopeRequest.get("semanticTriples")),
                 Instant.now()
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> envelopeRequest(Map<String, Object> request) {
+        Object envelope = request.get("envelope");
+        if (envelope instanceof Map<?, ?> nested) {
+            Map<String, Object> values = new HashMap<>();
+            nested.forEach((key, value) -> values.put(String.valueOf(key), value));
+            values.putIfAbsent("branchId", request.get("branchId"));
+            values.putIfAbsent("actorId", request.get("actorId"));
+            return values;
+        }
+        return request;
+    }
+
+    private CrdtOperationType operationType(Object explicitOperationType, String payload) {
+        String explicit = stringValue(explicitOperationType);
+        if (explicit != null && !explicit.isBlank()) {
+            return CrdtOperationType.fromString(explicit);
+        }
+        return inferCompatibilityOperationType(payload);
+    }
+
+    private Map<String, Long> vectorClock(Object raw) {
+        if (!(raw instanceof Map<?, ?> rawMap)) {
+            return Map.of();
+        }
+        Map<String, Long> vectorClock = new HashMap<>();
+        rawMap.forEach((key, value) -> {
+            if (key != null) {
+                vectorClock.put(String.valueOf(key), longValue(value));
+            }
+        });
+        return vectorClock;
+    }
+
+    private long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        String text = stringValue(value);
+        return text == null || text.isBlank() ? 0L : Long.parseLong(text);
     }
 
     private static String escapeNewlines(String s) {

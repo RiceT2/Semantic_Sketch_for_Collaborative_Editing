@@ -223,7 +223,11 @@ public class CollaborationSessionHub {
     }
 
     private String buildSemanticMergedDocument(BranchState state, String branchId) {
-        String projected = state.operations.stream()
+        String renderedDocument = crdtAdapter.renderDocument(branchId);
+        if (!renderedDocument.isBlank()) {
+            return renderedDocument;
+        }
+        return state.operations.stream()
                 .map(message -> {
                     CrdtOperationEnvelope envelope = state.operationEnvelopes.get(message.getOpId());
                     if (envelope == null) {
@@ -238,7 +242,6 @@ public class CollaborationSessionHub {
                 .filter(text -> !text.isEmpty())
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
-        return projected.isBlank() ? crdtAdapter.renderDocument(branchId) : projected;
     }
 
     private Map<String, Object> operationView(String branchId, Message message) {
