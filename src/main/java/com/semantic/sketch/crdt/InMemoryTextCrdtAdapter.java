@@ -34,7 +34,7 @@ public class InMemoryTextCrdtAdapter implements CrdtAdapter {
 
     private void applyReadyOperation(BranchDocument branch, DocumentState state, String targetPath, CrdtOperationEnvelope envelope) {
         switch (envelope.getOperationType()) {
-            case INSERT -> applyInsert(state, envelope);
+            case INSERT, ANNOTATE -> applyInsert(state, envelope);
             case DELETE -> applyDelete(state, envelope);
             case REPLACE -> applyReplace(state, envelope);
             default -> throw new IllegalArgumentException("Unsupported in-memory text operation: " + envelope.getOperationType());

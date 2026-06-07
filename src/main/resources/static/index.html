@@ -3,376 +3,379 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Semantic Sketch 协同编辑验证台</title>
+  <title>Semantic Sketch 场景化 CRDT-JSON 测试台</title>
   <style>
     :root { color-scheme: light; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
-    body { margin: 0; background: #f4f7fb; color: #172033; }
-    header { padding: 24px 32px; background: linear-gradient(135deg, #243b8f, #4b79f6); color: white; }
+    body { margin: 0; background: #f3f6fb; color: #172033; }
+    header { padding: 24px 32px; background: linear-gradient(135deg, #182d72, #4b79f6); color: white; }
     header h1 { margin: 0 0 8px; font-size: 26px; }
-    header p { margin: 0; opacity: .9; }
-    main { display: grid; grid-template-columns: 360px 1fr; gap: 18px; padding: 18px; }
-    section { background: white; border: 1px solid #dbe3f0; border-radius: 16px; box-shadow: 0 8px 24px rgba(33, 53, 94, .08); }
+    header p { margin: 0; opacity: .92; line-height: 1.6; }
+    main { display: grid; grid-template-columns: minmax(360px, 470px) 1fr; gap: 18px; padding: 18px; }
+    section, .card { background: white; border: 1px solid #dbe3f0; border-radius: 16px; box-shadow: 0 8px 24px rgba(33, 53, 94, .08); }
     .panel { padding: 18px; }
+    h2 { margin: 0 0 12px; font-size: 18px; color: #243b8f; }
+    h3 { margin: 12px 0 8px; font-size: 15px; color: #243b8f; }
     label { display: block; margin-top: 12px; font-size: 13px; font-weight: 700; color: #41506b; }
-    input, textarea, select { width: 100%; box-sizing: border-box; margin-top: 6px; border: 1px solid #c9d4e5; border-radius: 10px; padding: 10px 12px; font: inherit; }
-    textarea { min-height: 110px; resize: vertical; }
+    input, textarea, select { width: 100%; box-sizing: border-box; margin-top: 6px; border: 1px solid #c9d4e5; border-radius: 10px; padding: 10px 12px; font: inherit; background: white; }
+    textarea { min-height: 92px; resize: vertical; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 12px; max-height: 360px; overflow: auto; }
     button { border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; background: #315efb; color: white; }
     button.secondary { background: #eef3ff; color: #315efb; }
     button.danger { background: #f05252; }
+    button.ghost { background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
     button + button { margin-left: 8px; }
-    .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-    .timeline { padding: 18px; max-height: 720px; overflow: auto; }
-    .event { border-left: 4px solid #9fb5e8; margin-bottom: 12px; padding: 10px 12px; background: #f9fbff; border-radius: 10px; }
-    .event.conflict, .event.human_intervention_required { border-left-color: #f59e0b; background: #fff8ed; }
-    .event.human_decision { border-left-color: #10b981; background: #eefdf7; }
-    .event.applied { border-left-color: #315efb; }
-    .event h3 { margin: 0 0 6px; font-size: 15px; }
-    .event p { margin: 4px 0; font-size: 13px; color: #44536d; }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .button-row button + button { margin-left: 0; }
+    .layout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; }
+    .card { padding: 14px; min-height: 92px; }
     .full { grid-column: 1 / -1; }
-    .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 12px; background: #fbfdff; min-height: 92px; }
-    .card h2 { margin: 0 0 8px; font-size: 15px; color: #243b8f; }
+    .two { grid-column: span 2; }
+    .hint { font-size: 12px; color: #64748b; line-height: 1.55; }
+    .scenario { background: #f8fbff; border: 1px solid #dbeafe; border-radius: 12px; padding: 12px; line-height: 1.55; }
+    .scenario ul { padding-left: 18px; margin: 8px 0; }
+    .pill { display: inline-flex; align-items: center; gap: 4px; margin: 3px 4px 3px 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; background: #eef3ff; color: #243b8f; }
+    .pill.warn { background: #fff7ed; color: #c2410c; }
+    .pill.ok { background: #ecfdf5; color: #047857; }
+    .queue-item, .event, .request { border-left: 4px solid #9fb5e8; margin-bottom: 10px; padding: 10px 12px; background: #f9fbff; border-radius: 10px; font-size: 13px; }
+    .queue-item.concurrent { border-left-color: #f59e0b; background: #fff8ed; }
+    .event.human_intervention_required, .event.conflict_detected { border-left-color: #f59e0b; background: #fff8ed; }
+    .event.applied, .event.human_decision { border-left-color: #10b981; background: #eefdf7; }
+    .timeline { max-height: 520px; overflow: auto; }
+    .diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .counter { font-weight: 800; color: #315efb; }
     code { background: #edf2ff; padding: 2px 5px; border-radius: 5px; }
-    .op { padding: 8px; border-radius: 8px; background: #eef3ff; margin-top: 8px; font-size: 13px; }
-    .request { border: 1px dashed #f59e0b; background: #fff8ed; border-radius: 12px; padding: 12px; margin-top: 10px; }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 1050px) { main { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; } .full, .two { grid-column: 1; } .diff { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>Semantic Sketch 协同编辑验证台</h1>
-  <p>通过 HTTP + Server-Sent Events 模拟多用户编辑转发、语义冲突提示、最优方案计算与人工介入。</p>
+  <h1>Semantic Sketch 场景化 CRDT-JSON 测试台</h1>
+  <p>预设“发布说明协同修改”情景：前端选择角色、操作类型、目标段落、前置依赖与后置影响，生成 CRDT-JSON 消息；同一版本下排队的多个消息会以相同 base vector 发送，后端据此做并发冲突消融与后续处理。</p>
 </header>
 <main>
   <section class="panel">
-    <h2>协作文档编辑</h2>
+    <h2>1. 预设情景与版本窗口</h2>
     <label>分支 ID</label>
-    <input id="branchId" value="master">
-    <label>用户</label>
-    <select id="actorId">
-      <option value="alice">alice</option>
-      <option value="bob">bob</option>
-      <option value="owner">owner（高权重）</option>
-      <option value="reviewer">reviewer</option>
+    <input id="branchId" value="release-note-scenario">
+    <div class="scenario">
+      <strong id="scenarioTitle">发布说明协同修改</strong>
+      <p id="scenarioDescription" class="hint"></p>
+      <div><strong>前置依赖</strong><div id="scenarioDependencies"></div></div>
+      <div><strong>后置影响</strong><div id="scenarioImpacts"></div></div>
+    </div>
+    <div class="button-row">
+      <button onclick="updateVersion()">手动更新版本</button>
+      <button class="secondary" onclick="loadSnapshot()">只刷新快照</button>
+      <button class="ghost" onclick="resetLocalWindow()">重置本地窗口</button>
+    </div>
+    <p class="hint">当前本地版本：<span class="counter" id="versionLabel">v0</span>。点击“手动更新版本”前，本页生成/排队的多条 JSON 会共享同一个 base vector，因此后端会把它们当作并发候选。</p>
+
+    <h2>2. 生成 CRDT-JSON 操作</h2>
+    <label>角色</label>
+    <select id="actorId" onchange="fillTargetDraft()"></select>
+    <label>操作类型</label>
+    <select id="operationType" onchange="refreshDraft()">
+      <option value="REPLACE">REPLACE：替换目标内容</option>
+      <option value="INSERT">INSERT：在目标后插入</option>
+      <option value="DELETE">DELETE：删除目标内容</option>
+      <option value="ANNOTATE">ANNOTATE：补充批注意图</option>
     </select>
-
-    <label>文档编辑（所有用户在这里编辑同一文档）</label>
-    <textarea id="documentEditor" style="min-height:260px" placeholder="在此编辑，输入会自动同步（防抖）到其他用户"></textarea>
-
-    <p style="font-size:13px;color:#5c6b85">提示：在不同窗口以不同用户编辑同一文档可观察实时转发与冲突检测。</p>
-    <button onclick="submitEdit()">立即同步一次</button>
-    <button class="secondary" onclick="loadSnapshot()">刷新快照</button>
-    <hr>
-    <h3>并发模拟器（在本页内模拟多个用户）</h3>
-    <label>虚拟用户数</label>
-    <input id="simBotCount" type="number" value="4" min="1" max="200">
-    <label>每个用户平均发送间隔 (ms)</label>
-    <input id="simInterval" type="number" value="800" min="50">
-    <label>并发突发概率（0-1）</label>
-    <input id="simBurstProb" type="number" value="0.2" min="0" max="1" step="0.05">
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button onclick="startSimulation()">开始模拟</button>
-      <button class="secondary" onclick="stopSimulation()">停止模拟</button>
+    <label>目标内容</label>
+    <select id="targetPath" onchange="fillTargetDraft()"></select>
+    <label>编辑内容 / 意图文本</label>
+    <textarea id="intentText" oninput="refreshDraft()"></textarea>
+    <label>前置依赖（可编辑）</label>
+    <textarea id="precondition" oninput="refreshDraft()"></textarea>
+    <label>后置影响（可编辑）</label>
+    <textarea id="impactScope" oninput="refreshDraft()"></textarea>
+    <div class="button-row">
+      <button onclick="enqueueDraft()">加入并发队列</button>
+      <button class="secondary" onclick="sendDraftNow()">立即发送当前 JSON</button>
+      <button class="ghost" onclick="copyDraftJson()">复制 JSON</button>
     </div>
-    <p style="font-size:12px;color:#6b7280;margin-top:8px">说明：模拟器会在后台以不同 actorId 发送编辑请求以触发并发/冲突检测，页面会将事件显示在时间线中。</p>
-    <div class="quick">
-      <button class="secondary" onclick="demo('alice','replace title with semantic sketch')">Alice 标题</button>
-      <button class="secondary" onclick="demo('bob','replace title with collaborative sketch')">Bob 标题</button>
-      <button class="secondary" onclick="demo('owner','delete global section if stale')">Owner 删除</button>
-      <button class="secondary" onclick="demo('reviewer','insert local comment about conflict')">Reviewer 评论</button>
-    </div>
-    <div id="humanRequests"></div>
   </section>
+
   <section>
-    <div class="grid">
-      <div class="card"><h2>当前主文档操作</h2><div id="ops"></div></div>
-      <div class="card"><h2>待人工介入</h2><div id="pending"></div></div>
-      <div class="card"><h2>连接状态</h2><p id="status">连接中...</p><p>打开多个浏览器窗口可观察跨用户实时转发。</p></div>
-      <div class="card full"><h2>CRDT 可读合并结果</h2><pre id="rawDoc">-</pre></div>
-      <div class="card full"><h2>Semantic 最终合并结果</h2><pre id="semanticDoc">-</pre></div>
-      <div class="card full"><h2>仲裁解释（accepted / suppressed / compensated）</h2><div id="arbitration">暂无仲裁信息</div></div>
+    <div class="layout">
+      <div class="card"><h2>连接状态</h2><p id="status">SSE 连接中...</p><p class="hint">后端事件会实时进入下方时间线。</p></div>
+      <div class="card"><h2>本地 Base Vector</h2><pre id="baseVector">{}</pre></div>
+      <div class="card"><h2>并发队列</h2><p><span class="counter" id="queueCount">0</span> 条待发送</p><div class="button-row"><button onclick="sendQueuedOperations()">发送队列</button><button class="danger" onclick="clearQueue()">清空</button></div></div>
+      <div class="card two"><h2>当前生成的 CRDT-JSON</h2><pre id="draftJson">{}</pre></div>
+      <div class="card"><h2>队列明细</h2><div id="queueList" class="timeline"></div></div>
+      <div class="card full"><h2>后端文档视图</h2><div class="diff"><div><h3>Raw CRDT 可读合并结果</h3><pre id="rawDoc">-</pre></div><div><h3>Semantic 冲突消融后结果</h3><pre id="semanticDoc">-</pre></div></div></div>
+      <div class="card full"><h2>待人工介入</h2><div id="pending"></div></div>
+      <div class="card full"><h2>仲裁解释（accepted / suppressed / compensated）</h2><div id="arbitration" class="scenario">暂无仲裁信息</div></div>
+      <div class="card full"><h2>事件时间线</h2><div id="timeline" class="timeline"></div></div>
     </div>
-    <div class="timeline" id="timeline"></div>
   </section>
 </main>
-<!-- Consolidated script: define shared globals once and include all behavior -->
 <script>
-// Single declaration of shared globals
+const scenario = {
+  title: '发布说明协同修改',
+  description: '团队正在修改 v2.1 发布说明。安全负责人、产品经理、开发者和审阅者会同时编辑同一段内容，系统需要区分“同一版本内的并发修改”和“更新版本后的后续操作”。',
+  roles: [
+    { id: 'product-owner', label: '产品经理', defaultText: '将发布标题改为：v2.1 协同编辑增强版' },
+    { id: 'security-owner', label: '安全负责人（高权重）', defaultText: '补充安全说明：默认启用审计日志和导出脱敏' },
+    { id: 'frontend-dev', label: '前端开发', defaultText: '补充 UI 说明：新增冲突提示与版本更新按钮' },
+    { id: 'reviewer', label: '审阅者', defaultText: '标注风险：删除迁移说明前必须确认客户已完成升级' }
+  ],
+  targets: [
+    { path: '/document/title', label: '标题', text: 'v2.1 发布说明草稿', dependency: '依赖产品经理确认发布命名；标题变更会影响公告、搜索索引与邮件主题。', impact: '触发对外文档标题、站内通知和归档索引同步更新。' },
+    { path: '/document/security', label: '安全说明', text: '安全说明：待补充。', dependency: '依赖安全负责人完成威胁评估；不能与“删除审计日志”类操作同时接受。', impact: '影响合规审计、默认配置和用户升级提醒。' },
+    { path: '/document/migration', label: '迁移说明', text: '迁移说明：保留旧版配置兼容路径。', dependency: '依赖开发者确认兼容路径仍可用；删除该段会影响升级用户。', impact: '影响升级脚本、FAQ 和客服回复模板。' },
+    { path: '/document/ui', label: 'UI 变更', text: 'UI 变更：展示实时协作状态。', dependency: '依赖前端完成新交互；需要与安全说明保持一致。', impact: '影响截图、演示稿和用户培训材料。' }
+  ]
+};
+
 const timeline = document.getElementById('timeline');
-const editor = document.getElementById('documentEditor');
+const branchId = document.getElementById('branchId');
+const actorId = document.getElementById('actorId');
+const operationType = document.getElementById('operationType');
+const targetPath = document.getElementById('targetPath');
+const intentText = document.getElementById('intentText');
+const precondition = document.getElementById('precondition');
+const impactScope = document.getElementById('impactScope');
+let baseVector = {};
+let localVersion = 0;
+let queuedOperations = [];
+let lastSnapshot = null;
+
 const source = new EventSource('/events');
-let lastLocalEdit = 0;
-let debounceTimer = null;
-let sendInProgress = false;
-let simulationInterval = null; // ensure defined
-
-// Helper: safe JSON parser for SSE
-function safeParseEventData(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('SSE JSON parse error', e, raw);
-    if (timeline) {
-      const div = document.createElement('div');
-      div.className = 'event system';
-      div.innerHTML = `<h3>Invalid SSE JSON</h3><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${String(raw).slice(0,2000)}</pre><p style="color:#d04545">${String(e)}</p>`;
-      timeline.prepend(div);
-    }
-    return null;
-  }
-}
-
-// Attach SSE listeners
 ['connected','applied','human_intervention_required','conflict_detected','human_decision','snapshot','system'].forEach(name => {
   source.addEventListener(name, event => {
-    const parsed = safeParseEventData(event.data);
-    if (parsed !== null) renderEvent(name, parsed);
+    const parsed = safeParse(event.data, { message: event.data });
+    renderEvent(name, parsed);
   });
 });
 source.onopen = () => document.getElementById('status').textContent = 'SSE 已连接';
 source.onerror = () => document.getElementById('status').textContent = 'SSE 连接重试中';
 
-// Safe response parser for fetch
-async function parseResponse(res) {
-  const contentType = (res && res.headers && res.headers.get) ? (res.headers.get('content-type') || '') : '';
-  if (!res) return { message: 'No response object' };
-  if (res.status === 204) return { message: 'No content (204) from server', status: 204 };
-  if (contentType.includes('application/json')) {
-    try { return await res.json(); } catch (e) { return { message: 'Failed to parse JSON response', error: String(e), status: res.status }; }
-  }
-  try { const text = await res.text(); return { message: 'Non-JSON response', status: res.status, body: text }; } catch (e) { return { message: 'Failed to read response', error: String(e), status: res.status }; }
+function initializeScenario() {
+  document.getElementById('scenarioTitle').textContent = scenario.title;
+  document.getElementById('scenarioDescription').textContent = scenario.description;
+  document.getElementById('scenarioDependencies').innerHTML = scenario.targets.map(t => `<span class="pill warn">${escapeHtml(t.label)}：${escapeHtml(t.dependency)}</span>`).join('');
+  document.getElementById('scenarioImpacts').innerHTML = scenario.targets.map(t => `<span class="pill ok">${escapeHtml(t.label)}：${escapeHtml(t.impact)}</span>`).join('');
+  actorId.innerHTML = scenario.roles.map(role => `<option value="${role.id}">${role.label}</option>`).join('');
+  targetPath.innerHTML = scenario.targets.map(target => `<option value="${target.path}">${target.label} (${target.path})</option>`).join('');
+  fillTargetDraft();
+  updateVersionDisplays();
 }
 
-// Render event (safe)
-function renderEvent(type, data) {
-  if (!timeline) { console.warn('renderEvent: no timeline element'); return; }
-  const div = document.createElement('div');
-  div.className = 'event ' + type;
-  try {
-    div.innerHTML = `<h3>${label(type)}</h3><p>${(data && data.message) ? data.message : ''}</p>${operationSummary(data)}${metrics(data)}${opsLine(data)}`;
-  } catch (e) {
-    div.innerHTML = `<h3>${label(type)}</h3><pre>${String(data)}</pre>`;
-    console.error('renderEvent innerHTML construction failed', e, data);
-  }
-  timeline.prepend(div);
-  updateArbitration(data && data.arbitrationExplanation);
-  if (data && data.snapshot) updateSnapshot(data.snapshot);
-  if (data && data.incoming && data.incoming.payload) {
-    const incomingActor = data.incoming.actorId;
-    if (incomingActor !== actorId.value && document.activeElement !== editor) {
-      editor.value = data.incoming.payload;
-    }
+function selectedRole() { return scenario.roles.find(role => role.id === actorId.value) || scenario.roles[0]; }
+function selectedTarget() { return scenario.targets.find(target => target.path === targetPath.value) || scenario.targets[0]; }
+
+function fillTargetDraft() {
+  const role = selectedRole();
+  const target = selectedTarget();
+  intentText.value = role.defaultText;
+  precondition.value = target.dependency;
+  impactScope.value = target.impact;
+  refreshDraft();
+}
+
+function versionWindowVectorFor(actor) {
+  const vector = { ...baseVector };
+  vector[actor] = (baseVector[actor] || 0) + 1;
+  vector.__version = localVersion;
+  return vector;
+}
+
+function buildEnvelope(commitTick) {
+  const role = selectedRole();
+  const target = selectedTarget();
+  const type = operationType.value;
+  const text = intentText.value.trim() || role.defaultText;
+  const vectorClock = versionWindowVectorFor(role.id);
+  const insertedText = type === 'DELETE' ? null : `[${target.label}] ${text}`;
+  const deletedTextPreview = type === 'DELETE' ? target.text : null;
+  return {
+    opId: `ui-${localVersion}-${role.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    actorId: role.id,
+    branchId: branchId.value || 'release-note-scenario',
+    operationType: type,
+    targetPath: target.path,
+    fromIndex: null,
+    toIndex: null,
+    insertedText,
+    deletedTextPreview,
+    intentText: text,
+    crdtPayload: JSON.stringify({ type, targetPath: target.path, text, baseVersion: localVersion }),
+    encoding: 'json-crdt-patch-v1',
+    vectorClock,
+    semanticTriples: [{
+      operationType: type,
+      intent: text,
+      target: target.path,
+      precondition: precondition.value.trim(),
+      impactScope: impactScope.value.trim(),
+      polarity: type === 'DELETE' ? 'negative' : 'positive'
+    }]
+  };
+}
+
+function refreshDraft() {
+  const draft = buildEnvelope(false);
+  document.getElementById('draftJson').textContent = JSON.stringify({ envelope: draft }, null, 2);
+}
+
+function enqueueDraft() {
+  const envelope = buildEnvelope(true);
+  queuedOperations.push({ envelope, queuedAt: new Date().toISOString(), baseVersion: localVersion });
+  renderQueue();
+  refreshDraft();
+}
+
+async function sendDraftNow() {
+  const envelope = buildEnvelope(true);
+  await sendOperation({ envelope });
+  refreshDraft();
+}
+
+async function sendQueuedOperations() {
+  if (queuedOperations.length === 0) return;
+  const batch = [...queuedOperations];
+  clearQueue(false);
+  for (const item of batch) {
+    await sendOperation({ envelope: item.envelope });
   }
 }
 
-// Debounced auto-send on input
-editor.addEventListener('input', () => {
-  lastLocalEdit = Date.now();
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => { submitEdit(); }, 500);
-});
-
-// Submit function
-async function submitEdit() {
-  if (sendInProgress) return;
-  const body = { branchId: branchId.value, actorId: actorId.value, payload: editor.value, intentText: editor.value };
+async function sendOperation(body) {
   try {
-    sendInProgress = true;
+    renderEvent('system', { message: `发送 ${body.envelope.actorId} 的 ${body.envelope.operationType} 操作（base v${body.envelope.vectorClock.__version ?? 0}）` });
     const res = await fetch('/api/operations', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
     const json = await parseResponse(res);
     renderEvent('api_response', json);
-  } catch (e) { console.error('提交失败', e); renderEvent('system', { message: '提交失败: ' + String(e) }); }
-  finally { sendInProgress = false; }
+  } catch (e) {
+    renderEvent('system', { message: '发送失败: ' + String(e) });
+  }
 }
 
-// sendOperation used by simulator
-async function sendOperation(op) {
+async function updateVersion() {
+  await loadSnapshot();
+  baseVector = { ...(lastSnapshot && lastSnapshot.stateVector ? lastSnapshot.stateVector : {}) };
+  localVersion += 1;
+  updateVersionDisplays();
+  refreshDraft();
+  renderEvent('system', { message: `本地版本已更新到 v${localVersion}；后续 JSON 会基于最新 state vector，不再与更新前队列互为并发。` });
+}
+
+function resetLocalWindow() {
+  baseVector = {};
+  localVersion = 0;
+  queuedOperations = [];
+  updateVersionDisplays();
+  renderQueue();
+  refreshDraft();
+}
+
+async function loadSnapshot() {
   try {
-    const res = await fetch('/api/operations', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(op) });
+    const res = await fetch('/api/snapshot?branchId=' + encodeURIComponent(branchId.value));
+    const json = await parseResponse(res);
+    updateSnapshot(json.snapshot || json);
+  } catch (e) {
+    renderEvent('system', { message: '刷新快照失败: ' + String(e) });
+  }
+}
+
+async function humanDecision(requestId, decision) {
+  try {
+    const res = await fetch('/api/human-decision', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ branchId: branchId.value, requestId, decision }) });
     const json = await parseResponse(res);
     renderEvent('api_response', json);
-  } catch (e) { console.error('模拟提交失败', e); renderEvent('system', { message: '模拟提交失败: ' + String(e) }); }
+  } catch (e) {
+    renderEvent('system', { message: '人工决策失败: ' + String(e) });
+  }
 }
 
-// humanDecision and loadSnapshot
-async function humanDecision(requestId, decision) {
-  try { const res = await fetch('/api/human-decision', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ branchId: branchId.value, requestId, decision }) }); const json = await parseResponse(res); renderEvent('api_response', json); } catch (e) { console.error('humanDecision failed', e); renderEvent('system', { message: 'humanDecision 失败: ' + String(e) }); }
-}
-async function loadSnapshot() { try { const res = await fetch('/api/snapshot?branchId=' + encodeURIComponent(branchId.value)); const json = await parseResponse(res); if (json && json.snapshot) updateSnapshot(json.snapshot); else updateSnapshot(json); } catch (e) { console.error('loadSnapshot failed', e); renderEvent('system', { message: 'loadSnapshot 失败: ' + String(e) }); } }
-
-// UI helpers: label, metrics, opsLine, operationSummary, formatOperation, range, updateSnapshot, updateArbitration, etc.
-// ...existing code... (these helper functions are already defined earlier in file; ensure no duplicates remain)
-// ==========================================
-// 5.27补齐 UI 辅助函数与状态渲染逻辑
-// ==========================================
-
-function label(type) {
-    const labels = {
-        'connected': '已建立实时协同连接',
-        'applied': 'CRDT 操作成功应用 (Applied)',
-        'conflict_detected': '⚠️ 语义冲突检测提示 (Conflict)',
-        'human_intervention_required': '⏳ 触发暂停：等待人工决策介入',
-        'human_decision': '✅ 人工决策已应用',
-        'snapshot': '实时文档快照更新',
-        'system': '系统级通知',
-        'api_response': 'API 请求响应状态'
-    };
-    return labels[type] || type.toUpperCase();
+function renderQueue() {
+  document.getElementById('queueCount').textContent = queuedOperations.length;
+  const container = document.getElementById('queueList');
+  if (queuedOperations.length === 0) {
+    container.innerHTML = '<p class="hint">暂无待发送 JSON。先点击“加入并发队列”。</p>';
+    return;
+  }
+  container.innerHTML = queuedOperations.map((item, index) => {
+    const op = item.envelope;
+    return `<div class="queue-item concurrent"><strong>#${index + 1}</strong> <code>${escapeHtml(op.actorId)}</code> ${escapeHtml(op.operationType)} <code>${escapeHtml(op.targetPath)}</code><br><span class="hint">base v${item.baseVersion} · ${escapeHtml(op.intentText)}</span></div>`;
+  }).join('');
 }
 
-function operationSummary(data) {
-    if (!data || !data.incoming) return '';
-    const inc = data.incoming;
-    return `<div class="op">
-    <strong>分支:</strong> <code>${inc.branchId || 'default'}</code> |
-    <strong>操作者:</strong> <span style="color:#243b8f;font-weight:bold">${inc.actorId}</span><br>
-    <strong>输入文本:</strong> "${inc.payload || ''}"<br>
-    <strong>语义意图:</strong> <span style="color:#5c6b85;font-style:italic">${inc.intentText || '无'}</span>
-  </div>`;
+function clearQueue(render = true) {
+  queuedOperations = [];
+  if (render) renderQueue();
 }
 
-function metrics(data) {
-    if (!data || (!data.semanticSimilarity && data.semanticSimilarity !== 0)) return '';
-    const sim = (data.semanticSimilarity * 100).toFixed(1);
-    let color = '#10b981'; // 绿
-    if (data.conflict) color = '#f59e0b'; // 橙
-    return `<p style="font-size:12px;margin-top:6px;">
-    📊 语义相似度契合值: <strong style="color:${color}">${sim}%</strong>
-    ${data.conflict ? '<strong>[检测到冲突消融风险]</strong>' : ''}
-  </p>`;
-}
-
-function opsLine(data) {
-    if (!data || !data.message) return '';
-    return '';
-}
-
-function updateArbitration(explanation) {
-    const container = document.getElementById('arbitration');
-    if (!container) return;
-    if (!explanation) {
-        container.innerHTML = `<span style="color:#8c9ba5">暂无最新冲突仲裁执行指令</span>`;
-        return;
-    }
-    const html = typeof explanation === 'string'
-        ? escapeHtml(explanation)
-        : formatArbitrationExplanation(explanation);
-    container.innerHTML = `<div style="background:#eef2ff;padding:8px 12px;border-radius:8px;border-left:4px solid #315efb;font-size:13px;line-height:1.5">
-    ${html}
-  </div>`;
-}
-
-function formatArbitrationExplanation(explanation) {
-    const accepted = (explanation.accepted || []).map(op => `${op.actorId || 'unknown'}:${op.operationType || 'op'} → ${op.payload || op.intentText || ''}`).join('<br>') || '无';
-    const suppressed = (explanation.suppressed || []).map(op => `${op.actorId || 'unknown'}:${op.operationType || 'op'} → ${op.payload || op.intentText || ''}`).join('<br>') || '无';
-    return `<strong>决策来源:</strong> ${escapeHtml(explanation.decisionSource || 'system')}<br>
-            <strong>原因:</strong> ${escapeHtml(explanation.reason || '')}<br>
-            <strong>accepted:</strong><br>${escapeHtml(accepted).replaceAll('&lt;br&gt;', '<br>')}<br>
-            <strong>suppressed:</strong><br>${escapeHtml(suppressed).replaceAll('&lt;br&gt;', '<br>')}`;
-}
-
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+function updateVersionDisplays() {
+  document.getElementById('versionLabel').textContent = 'v' + localVersion;
+  document.getElementById('baseVector').textContent = JSON.stringify(baseVector, null, 2);
 }
 
 function updateSnapshot(snapshot) {
-    if (!snapshot) return;
-
-    const rawDocText =
-        snapshot.rawCrdtDocument
-        || snapshot.document
-        || (snapshot.crdt && typeof snapshot.crdt.document === 'string' ? snapshot.crdt.document : null)
-        || '-';
-
-    // 渲染 Raw CRDT 的可读合并文本（优先展示后端已投影出的文档）
-    const rawContainer = document.getElementById('rawDoc');
-    if (rawContainer) {
-        rawContainer.textContent = typeof rawDocText === 'string' ? rawDocText : JSON.stringify(rawDocText, null, 2);
-    }
-
-    const semanticDocText =
-        snapshot.semanticMergedDocument
-        || snapshot.document
-        || '-';
-
-    // 渲染经过冲突消融（Ablation）后的最终语义文本
-    const semanticContainer = document.getElementById('semanticDoc');
-    if (semanticContainer) {
-        semanticContainer.textContent = semanticDocText;
-    }
-
-    // 更新左侧主编辑框的值（如果用户当前没在输入，防止光标被强行打断）
-    if (semanticDocText && semanticDocText !== '-' && document.activeElement !== editor) {
-        editor.value = semanticDocText;
-    }
-
-    // 更新当前待处理的人工介入任务卡片
-    updatePendingRequests(snapshot.pendingRequests || snapshot.humanRequests);
+  if (!snapshot) return;
+  lastSnapshot = snapshot;
+  document.getElementById('rawDoc').textContent = snapshot.rawCrdtDocument || snapshot.document || '-';
+  document.getElementById('semanticDoc').textContent = snapshot.semanticMergedDocument || snapshot.document || '-';
+  updatePendingRequests(snapshot.pendingRequests || []);
 }
 
 function updatePendingRequests(requests) {
-    const container = document.getElementById('pending');
-    const leftContainer = document.getElementById('humanRequests');
-    if (!container) return;
-
-    if (!requests || requests.length === 0) {
-        container.innerHTML = `<p style="color:#8c9ba5;font-size:13px;margin:0">目前没有积压的冲突介入请求</p>`;
-        if (leftContainer) leftContainer.innerHTML = '';
-        return;
-    }
-
-    let html = '';
-    let leftHtml = '';
-
-    requests.forEach(req => {
-        html += `<div class="request" style="font-size:13px;margin-bottom:8px;">
-      <strong>[请求 #${req.id || '新建'}]</strong> ${req.description || '语义冲突待裁决'}<br>
-      <div style="margin-top:6px">
-        <button style="padding:4px 8px;font-size:12px;" onclick="humanDecision('${req.id}', 'ACCEPT_INCOMING')">采纳新编辑</button>
-        <button class="secondary" style="padding:4px 8px;font-size:12px;" onclick="humanDecision('${req.id}', 'KEEP_CURRENT')">保留原内容</button>
-      </div>
-    </div>`;
-    });
-
-    container.innerHTML = html;
-    if (leftContainer) leftContainer.innerHTML = html;
+  const container = document.getElementById('pending');
+  if (!requests || requests.length === 0) {
+    container.innerHTML = '<p class="hint">目前没有积压的冲突介入请求。</p>';
+    return;
+  }
+  container.innerHTML = requests.map(req => {
+    const requestId = req.requestId || req.id || '';
+    const incoming = req.incoming || {};
+    return `<div class="request"><strong>请求 ${escapeHtml(requestId)}</strong><br><span class="hint">incoming: ${escapeHtml(incoming.actorId || 'unknown')} / ${escapeHtml(incoming.operationType || 'op')} / ${escapeHtml(incoming.targetPath || '')}</span><div class="button-row"><button onclick="humanDecision('${escapeHtml(requestId)}', 'accept')">接受推荐方案</button><button class="secondary" onclick="humanDecision('${escapeHtml(requestId)}', 'rollback')">回滚候选</button></div></div>`;
+  }).join('');
 }
 
-// Simulation logic (use simulationInterval variable)
-let botIdCounter = 0;
-const activeBots = new Set();
-function randInt(max) { return Math.floor(Math.random() * max); }
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-function startSimulation() {
-  const botCount = Math.max(1, Math.min(200, parseInt(simBotCount.value) || 4));
-  const interval = Math.max(50, parseInt(simInterval.value) || 800);
-  const burstProb = Math.min(1, Math.max(0, parseFloat(simBurstProb.value) || 0.2));
-  stopSimulation();
-  // Use setInterval to allow stopSimulation to clear it easily
-  simulationInterval = setInterval(() => {
-    // spawn random bot activity at each tick
-    const actorIndex = randInt(botCount) + 1;
-    const actor = `bot${actorIndex}`;
-    const op = { branchId: branchId.value, actorId: actor, payload: `自动编辑 ${actor} ${Date.now()}`, intentText: `auto by ${actor}` };
-    sendOperation(op);
-  }, Math.max(80, interval));
+function updateArbitration(explanation) {
+  const container = document.getElementById('arbitration');
+  if (!explanation) {
+    container.textContent = '暂无仲裁信息';
+    return;
+  }
+  const accepted = (explanation.accepted || []).map(op => `${op.actorId}:${op.operationType} ${op.targetPath || ''}`).join('\n') || '无';
+  const suppressed = (explanation.suppressed || []).map(op => `${op.actorId}:${op.operationType} ${op.targetPath || ''}`).join('\n') || '无';
+  container.innerHTML = `<strong>决策来源：</strong>${escapeHtml(explanation.decisionSource || 'system')}<br><strong>原因：</strong>${escapeHtml(explanation.reason || '')}<br><strong>accepted：</strong><pre>${escapeHtml(accepted)}</pre><strong>suppressed：</strong><pre>${escapeHtml(suppressed)}</pre>`;
 }
 
-function stopSimulation() {
-  activeBots.clear();
-  if (simulationInterval) { clearInterval(simulationInterval); simulationInterval = null; }
+function renderEvent(type, data) {
+  const div = document.createElement('div');
+  div.className = 'event ' + type;
+  div.innerHTML = `<strong>${escapeHtml(label(type))}</strong><p>${escapeHtml(data && data.message ? data.message : '')}</p>${operationSummary(data)}`;
+  timeline.prepend(div);
+  if (data && data.snapshot) updateSnapshot(data.snapshot);
+  if (data && data.arbitrationExplanation) updateArbitration(data.arbitrationExplanation);
 }
 
-// Expose demo buttons' helper
-function demo(actor, text) { actorId.value = actor; editor.value = text; lastLocalEdit = Date.now(); submitEdit(); }
+function operationSummary(data) {
+  const inc = data && data.incoming;
+  if (!inc) return '';
+  return `<div class="hint">actor=<code>${escapeHtml(inc.actorId)}</code> type=<code>${escapeHtml(inc.operationType)}</code> target=<code>${escapeHtml(inc.targetPath || '')}</code><br>vector=<code>${escapeHtml(JSON.stringify(inc.vectorClock || {}))}</code><br>${escapeHtml(inc.intentText || inc.payload || '')}</div>`;
+}
 
-// Initialize snapshot on load
+function label(type) {
+  return ({ connected: '已建立实时协同连接', applied: '操作已应用', conflict_detected: '检测到语义冲突', human_intervention_required: '等待人工介入', human_decision: '人工决策已应用', snapshot: '快照更新', system: '系统通知', api_response: 'API 响应' })[type] || type;
+}
+
+async function parseResponse(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return res.json();
+  return { status: res.status, message: await res.text() };
+}
+
+function safeParse(raw, fallback) { try { return JSON.parse(raw); } catch (e) { return fallback; } }
+function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
+async function copyDraftJson() { await navigator.clipboard.writeText(document.getElementById('draftJson').textContent); renderEvent('system', { message: '当前 CRDT-JSON 已复制。' }); }
+
+initializeScenario();
+renderQueue();
 loadSnapshot();
 </script>
 </body>
