@@ -76,8 +76,8 @@ public class CollaborationSessionHub {
 
     public synchronized HubResult submit(CrdtOperationEnvelope envelope) {
         BranchState state = branch(envelope.getBranchId());
-        long actorTick = state.actorClock.merge(envelope.getActorId(), 1L, Long::sum);
-        CrdtOperationEnvelope stampedEnvelope = stampEnvelope(envelope, Map.of(envelope.getActorId(), actorTick));
+        Map<String, Long> vectorClock = nextVectorClock(state, envelope);
+        CrdtOperationEnvelope stampedEnvelope = stampEnvelope(envelope, vectorClock);
         Message incoming = stampedEnvelope.toMessage();
         state.operationEnvelopes.put(incoming.getOpId(), stampedEnvelope);
 
@@ -111,6 +111,19 @@ public class CollaborationSessionHub {
         state.pendingRequests.put(requestId, new InterventionRequest(requestId, stampedEnvelope.getBranchId(), incoming, decision, residue, Instant.now()));
         return HubResult.humanRequired(stampedEnvelope.getBranchId(), incoming, decision.acceptedOps(), decision.rejectedOps(), decision.score(), residue,
                 "检测到并发语义冲突且意图残留度低于阈值，已发起人工介入请求。", requestId);
+    }
+
+    private Map<String, Long> nextVectorClock(BranchState state, CrdtOperationEnvelope envelope) {
+        Map<String, Long> provided = envelope.getVectorClock();
+        String actorId = envelope.getActorId();
+        if (provided != null && !provided.isEmpty() && provided.containsKey(actorId)) {
+            Map<String, Long> normalized = new HashMap<>(provided);
+            long actorTick = normalized.getOrDefault(actorId, 0L);
+            state.actorClock.merge(actorId, actorTick, Math::max);
+            return Map.copyOf(normalized);
+        }
+        long actorTick = state.actorClock.merge(actorId, 1L, Long::sum);
+        return Map.of(actorId, actorTick);
     }
 
     public synchronized HubResult decide(String branchId, String requestId, String decisionType) {
